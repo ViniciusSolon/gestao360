@@ -7,6 +7,7 @@ import { atLeast } from '../auth/roles.js';
 import { forbidden, notFound, unprocessable } from '../lib/errors.js';
 import { audit, consumeLeadQuota, releaseLeadQuota } from '../lib/limits.js';
 import { MQL_THRESHOLD, scoreLead } from '../lib/pricing.js';
+import { isValidCnpj, normalizeCnpj } from '../lib/cnpj.js';
 import { guard, idParam, optionalText, params } from './common.js';
 
 export const CHANNELS = ['site', 'indicacao', 'evento', 'whatsapp', 'email', 'telefone', 'redes_sociais', 'outro'] as const;
@@ -14,6 +15,15 @@ export const CHANNELS = ['site', 'indicacao', 'evento', 'whatsapp', 'email', 'te
 const leadBody = z.object({
   name: z.string().trim().min(1).max(160),
   company: optionalText(160),
+  /** Com ou sem máscara; numérico ou alfanumérico. Validado pelos dígitos verificadores. */
+  cnpj: z
+    .string()
+    .trim()
+    .max(30)
+    .optional()
+    .nullable()
+    .transform((v) => (v ? normalizeCnpj(v) : null))
+    .refine((v) => v === null || isValidCnpj(v), 'CNPJ inválido (confira os dígitos)'),
   email: z.string().trim().toLowerCase().email().max(200).optional().nullable().or(z.literal('')).transform((v) => v || null),
   phone: optionalText(40),
   channel: z.enum(CHANNELS).default('outro'),
@@ -69,9 +79,16 @@ export async function leadRoutes(app: FastifyInstance, deps: Deps) {
       const where: string[] = ['$SCOPE'];
       if (f.status) { p.push(f.status); where.push(`l.status = $${p.length}`); }
       if (f.ownerId) { p.push(f.ownerId); where.push(`l.owner_id = $${p.length}`); }
-      if (f.q) { p.push(`%${f.q}%`); where.push(`(l.name ILIKE $${p.length} OR l.company ILIKE $${p.length} OR l.email ILIKE $${p.length})`); }
+      if (f.q) {
+        const text = p.push(`%${f.q}%`);
+        const conds = [`l.name ILIKE $${text}`, `l.company ILIKE $${text}`, `l.email ILIKE $${text}`];
+        // Busca por CNPJ digitado com ou sem máscara
+        const cnpjTerm = normalizeCnpj(f.q);
+        if (/^[0-9A-Z]{3,14}$/.test(cnpjTerm)) conds.push(`l.cnpj LIKE $${p.push(`%${cnpjTerm}%`)}`);
+        where.push(`(${conds.join(' OR ')})`);
+      }
       const q = withScope(
-        `SELECT l.id, l.name, l.company, l.email, l.phone, l.channel, l.stage_id, l.status, l.is_mql, l.score,
+        `SELECT l.id, l.name, l.company, l.cnpj, l.email, l.phone, l.channel, l.stage_id, l.status, l.is_mql, l.score,
                 l.value_cents, l.expected_close_date, l.owner_id, u.name AS owner_name, l.created_at, l.updated_at
            FROM leads l LEFT JOIN users u ON u.id = l.owner_id
           WHERE ${where.join(' AND ')}
@@ -96,9 +113,9 @@ export async function leadRoutes(app: FastifyInstance, deps: Deps) {
       if (stage.kind !== 'open') throw unprocessable('Novos leads entram em etapa aberta', 'invalid_stage');
       await consumeLeadQuota(c);
       const r = await c.query(
-        `INSERT INTO leads (tenant_id, name, company, email, phone, channel, owner_id, stage_id, score, is_mql, value_cents, expected_close_date)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-        [a.tenantId, b.name, b.company, b.email, b.phone, b.channel, ownerId, stage.id, score, score >= MQL_THRESHOLD, b.valueCents, b.expectedCloseDate ?? null],
+        `INSERT INTO leads (tenant_id, name, company, email, phone, channel, owner_id, stage_id, score, is_mql, value_cents, expected_close_date, cnpj)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+        [a.tenantId, b.name, b.company, b.email, b.phone, b.channel, ownerId, stage.id, score, score >= MQL_THRESHOLD, b.valueCents, b.expectedCloseDate ?? null, b.cnpj ?? null],
       );
       await c.query(`INSERT INTO lead_events (tenant_id, lead_id, user_id, type, data) VALUES ($1, $2, $3, 'created', '{}')`, [a.tenantId, r.rows[0].id, a.userId]);
       return r.rows[0];
@@ -130,6 +147,7 @@ export async function leadRoutes(app: FastifyInstance, deps: Deps) {
       const merged = {
         name: b.name ?? lead.name,
         company: b.company !== undefined ? b.company : lead.company,
+        cnpj: b.cnpj !== undefined ? b.cnpj : lead.cnpj,
         email: b.email !== undefined ? b.email : lead.email,
         phone: b.phone !== undefined ? b.phone : lead.phone,
         channel: b.channel ?? lead.channel,
@@ -139,9 +157,9 @@ export async function leadRoutes(app: FastifyInstance, deps: Deps) {
       const score = scoreLead(merged);
       const r = await c.query(
         `UPDATE leads SET name=$2, company=$3, email=$4, phone=$5, channel=$6, value_cents=$7, expected_close_date=$8,
-                owner_id=$9, score=$10, is_mql = is_mql OR $11, updated_at = now()
+                owner_id=$9, score=$10, is_mql = is_mql OR $11, cnpj=$12, updated_at = now()
           WHERE id = $1 RETURNING *`,
-        [id, merged.name, merged.company, merged.email, merged.phone, merged.channel, merged.valueCents, merged.expectedCloseDate, ownerId, score, score >= MQL_THRESHOLD],
+        [id, merged.name, merged.company, merged.email, merged.phone, merged.channel, merged.valueCents, merged.expectedCloseDate, ownerId, score, score >= MQL_THRESHOLD, merged.cnpj],
       );
       await c.query(`INSERT INTO lead_events (tenant_id, lead_id, user_id, type, data) VALUES ($1, $2, $3, 'updated', $4)`, [a.tenantId, id, a.userId, JSON.stringify(Object.keys(b))]);
       return r.rows[0];

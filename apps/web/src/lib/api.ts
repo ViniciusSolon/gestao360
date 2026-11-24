@@ -102,7 +102,24 @@ export function toCents(v: string): number {
   return Number.isFinite(n) ? Math.round(n * 100) : NaN;
 }
 
-export type Role = 'owner' | 'admin' | 'manager' | 'seller';
+/**
+ * Máscara de CNPJ enquanto digita (numérico ou alfanumérico): 12.ABC.345/01DE-35.
+ * Só formata — quem valida os dígitos verificadores é o servidor.
+ */
+export function maskCnpj(v: string): string {
+  const c = v.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 14);
+  const parts = [c.slice(0, 2), c.slice(2, 5), c.slice(5, 8), c.slice(8, 12), c.slice(12, 14)];
+  let out = parts[0];
+  if (parts[1]) out += `.${parts[1]}`;
+  if (parts[2]) out += `.${parts[2]}`;
+  if (parts[3]) out += `/${parts[3]}`;
+  if (parts[4]) out += `-${parts[4]}`;
+  return out;
+}
+
+export const formatCnpj = (v: string | null | undefined) => (v ? maskCnpj(v) : '');
+
+export type Role ='owner' | 'admin' | 'manager' | 'seller';
 const RANK: Record<Role, number> = { seller: 1, manager: 2, admin: 3, owner: 4 };
 /** Só para esconder botões (UX). O servidor valida de novo. */
 export const can = (role: Role | undefined, min: Role) => !!role && RANK[role] >= RANK[min];

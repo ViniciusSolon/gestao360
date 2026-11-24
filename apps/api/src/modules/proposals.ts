@@ -9,6 +9,7 @@ import { conflict, notFound, unprocessable } from '../lib/errors.js';
 import { idempotentTx } from '../lib/idempotency.js';
 import { audit, nextCounter } from '../lib/limits.js';
 import { assertDiscountAllowed, priceItem, sumTotals, type PricedItem } from '../lib/pricing.js';
+import { formatCnpj } from '../lib/cnpj.js';
 import { guard, idParam, optionalText, params } from './common.js';
 import { loadVisibleLead } from './leads.js';
 
@@ -58,6 +59,7 @@ function renderPdf(data: { tenantName: string; proposal: any; lead: any; items: 
     if (p.valid_until) doc.text(`Válida até ${new Date(p.valid_until).toLocaleDateString('pt-BR')}`);
     doc.moveDown();
     doc.fillColor('#0f172a').fontSize(12).text(`Cliente: ${lead.name}${lead.company ? ` — ${lead.company}` : ''}`);
+    if (lead.cnpj) doc.fontSize(10).fillColor('#475569').text(`CNPJ: ${formatCnpj(lead.cnpj)}`).fillColor('#0f172a');
     doc.moveDown();
 
     const cols = [50, 250, 310, 390, 470];
@@ -204,7 +206,7 @@ export async function proposalRoutes(app: FastifyInstance, deps: Deps) {
     const { id } = params(idParam, req);
     const data = await db.withAuth(a, async (c) => {
       const proposal = await loadVisibleProposal(c, a, id);
-      const lead = (await c.query('SELECT name, company FROM leads WHERE id = $1', [proposal.lead_id])).rows[0];
+      const lead = (await c.query('SELECT name, company, cnpj FROM leads WHERE id = $1', [proposal.lead_id])).rows[0];
       const items = (await c.query('SELECT * FROM proposal_items WHERE proposal_id = $1 ORDER BY position', [id])).rows;
       return { tenantName: a.tenantName, proposal, lead, items };
     });

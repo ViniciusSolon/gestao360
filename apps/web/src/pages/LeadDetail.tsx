@@ -1,11 +1,46 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, brl, CHANNELS, dateBR, dateTimeBR, useApi, useSubmit } from '../lib/api';
+import { api, brl, CHANNELS, dateBR, dateTimeBR, formatCnpj, maskCnpj, useApi, useSubmit } from '../lib/api';
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'Lead criado', updated: 'Dados atualizados', stage_changed: 'Mudou de etapa', activity_created: 'Atividade criada',
   activity_done: 'Atividade concluída', proposal_created: 'Proposta criada', proposal_accepted: 'Proposta aceita',
 };
+
+/** CNPJ do lead com edição no lugar. A máscara é só visual; o servidor valida os dígitos. */
+function CnpjField({ leadId, value, onSaved }: { leadId: string; value: string | null; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState('');
+  const save = useSubmit(async (e: FormEvent) => {
+    e.preventDefault();
+    await api(`/leads/${leadId}`, { method: 'PATCH', body: { cnpj: v || null } });
+    setEditing(false);
+    onSaved();
+  });
+  if (!editing) {
+    return (
+      <div>
+        <div className="muted">CNPJ</div>
+        {value ? formatCnpj(value) : '—'}{' '}
+        <button type="button" className="secondary" style={{ padding: '.1rem .5rem', fontSize: '.8rem' }} onClick={() => { setV(formatCnpj(value)); setEditing(true); }}>
+          {value ? 'Editar' : 'Adicionar'}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <form onSubmit={save.run}>
+      <label>CNPJ
+        <input autoFocus value={v} onChange={(e) => setV(maskCnpj(e.target.value))} placeholder="00.000.000/0000-00" />
+      </label>
+      <div className="row" style={{ marginTop: '.4rem' }}>
+        <button disabled={save.busy} style={{ padding: '.25rem .6rem' }}>Salvar</button>
+        <button type="button" className="secondary" style={{ padding: '.25rem .6rem' }} onClick={() => { setEditing(false); save.setError(null); }}>Cancelar</button>
+      </div>
+      {save.error && <div className="error">{save.error}</div>}
+    </form>
+  );
+}
 
 export function LeadDetail() {
   const { id } = useParams();
@@ -30,6 +65,7 @@ export function LeadDetail() {
       </div>
       <div className="card form-grid">
         <div><div className="muted">Empresa</div>{lead.company ?? '—'}</div>
+        <CnpjField leadId={lead.id} value={lead.cnpj} onSaved={reload} />
         <div><div className="muted">E-mail</div>{lead.email ?? '—'}</div>
         <div><div className="muted">Telefone</div>{lead.phone ?? '—'}</div>
         <div><div className="muted">Canal</div>{CHANNELS[lead.channel] ?? lead.channel}</div>

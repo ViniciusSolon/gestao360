@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { api, brl, can, CHANNELS, toCents, useApi, useSubmit } from '../lib/api';
+import { api, brl, can, CHANNELS, formatCnpj, maskCnpj, toCents, useApi, useSubmit } from '../lib/api';
 import { useSession } from '../lib/session';
 
 interface Stage { id: string; name: string; kind: string; probability: number }
 export interface Lead {
-  id: string; name: string; company: string | null; stage_id: string; status: string; score: number; is_mql: boolean;
+  id: string; name: string; company: string | null; cnpj: string | null; stage_id: string; status: string; score: number; is_mql: boolean;
   value_cents: string; owner_name: string | null; channel: string;
 }
 
@@ -37,14 +37,21 @@ export function Kanban() {
     leads.reload();
   };
 
-  const visible = (leads.data ?? []).filter((l) => !q || `${l.name} ${l.company ?? ''}`.toLowerCase().includes(q.toLowerCase()));
+  // Busca por nome, empresa ou CNPJ (com ou sem máscara)
+  const qCnpj = q.toUpperCase().replace(/[^0-9A-Z]/g, '');
+  const visible = (leads.data ?? []).filter(
+    (l) =>
+      !q ||
+      `${l.name} ${l.company ?? ''}`.toLowerCase().includes(q.toLowerCase()) ||
+      (qCnpj.length >= 3 && !!l.cnpj?.includes(qCnpj)),
+  );
 
   return (
     <div>
       <div className="row between">
         <h1>Funil comercial</h1>
         <div className="row">
-          <input placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
+          <input placeholder="Buscar nome, empresa ou CNPJ…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
           <button onClick={() => setCreating(true)}>+ Novo lead</button>
           {can(me.user.role, 'admin') && <StageAdmin onChange={stages.reload} />}
         </div>
@@ -67,6 +74,7 @@ export function Kanban() {
                 <div key={l.id} className="lead" draggable onDragStart={(e) => e.dataTransfer.setData('text/lead', l.id)}>
                   <Link to={`/app/leads/${l.id}`} className="t">{l.name}</Link>
                   <div className="s">{l.company ?? '—'} · {brl(l.value_cents)}</div>
+                  {l.cnpj && <div className="s cnpj">CNPJ {formatCnpj(l.cnpj)}</div>}
                   <div className="s row">
                     <span>Score {l.score}</span>{l.is_mql && <span className="badge">MQL</span>}<span>{l.owner_name ?? 'sem responsável'}</span>
                   </div>
@@ -82,14 +90,14 @@ export function Kanban() {
 }
 
 function NewLead({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [f, setF] = useState({ name: '', company: '', email: '', phone: '', channel: 'site', value: '', expectedCloseDate: '' });
+  const [f, setF] = useState({ name: '', company: '', cnpj: '', email: '', phone: '', channel: 'site', value: '', expectedCloseDate: '' });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const submit = useSubmit(async (e: FormEvent) => {
     e.preventDefault();
     await api('/leads', {
       method: 'POST',
       body: {
-        name: f.name, company: f.company || null, email: f.email || null, phone: f.phone || null, channel: f.channel,
+        name: f.name, company: f.company || null, cnpj: f.cnpj || null, email: f.email || null, phone: f.phone || null, channel: f.channel,
         valueCents: f.value ? toCents(f.value) : 0, expectedCloseDate: f.expectedCloseDate || null,
       },
     });
@@ -102,6 +110,7 @@ function NewLead({ onClose, onCreated }: { onClose: () => void; onCreated: () =>
         <div className="form-grid">
           <label>Nome*<input required value={f.name} onChange={set('name')} /></label>
           <label>Empresa<input value={f.company} onChange={set('company')} /></label>
+          <label>CNPJ<input value={f.cnpj} onChange={(e) => setF({ ...f, cnpj: maskCnpj(e.target.value) })} placeholder="00.000.000/0000-00" autoComplete="off" /></label>
           <label>E-mail<input type="email" value={f.email} onChange={set('email')} /></label>
           <label>Telefone<input value={f.phone} onChange={set('phone')} /></label>
           <label>Canal<select value={f.channel} onChange={set('channel')}>{Object.entries(CHANNELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>

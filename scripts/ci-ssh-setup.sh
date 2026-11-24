@@ -24,11 +24,34 @@ main() {
   [[ "$port" =~ ^[0-9]+$ ]] || { echo "::error::VPS_PORT precisa ser só o número da porta"; fail=1; }
   [[ "$host" =~ [[:space:]@] ]] && { echo "::error::VPS_HOST deve ser só o IP ou nome (sem espaços, sem usuário@)"; fail=1; }
 
-  # Chave privada: remove \r e espaços nas pontas de cada linha
-  printf '%s\n' "${VPS_SSH_KEY:-}" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | grep -v '^$' > "$dir/deploy_key" || true
+  # Chave privada: aproveita só o trecho BEGIN…END (descarta marcas -----8<----- e texto
+  # em volta), tira \r/espaços e, se veio tudo numa linha só, remonta as quebras de linha.
+  local raw
+  raw="$(printf '%s\n' "${VPS_SSH_KEY:-}" | tr -d '\r')"
+  if [[ "$(printf '%s\n' "$raw" | grep -c 'PRIVATE KEY-----')" -eq 1 ]]; then
+    # BEGIN e END na mesma linha: o corpo veio separado por espaços
+    raw="$(printf '%s\n' "$raw" | grep 'PRIVATE KEY-----' \
+      | sed -E 's/.*(-----BEGIN [A-Z ]*PRIVATE KEY-----)(.*)(-----END [A-Z ]*PRIVATE KEY-----).*/\1\n\2\n\3/' \
+      | awk 'NR==2 { gsub(/[[:space:]]+/, "\n") } { print }')"
+  fi
+  printf '%s\n' "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+    | sed -n '/^-----BEGIN [A-Z ]*PRIVATE KEY-----$/,/^-----END [A-Z ]*PRIVATE KEY-----$/p' \
+    | grep -v '^$' > "$dir/deploy_key" || true
   chmod 600 "$dir/deploy_key"
-  if ! ssh-keygen -y -f "$dir/deploy_key" >/dev/null 2>&1; then
-    echo "::error::VPS_SSH_KEY não é uma chave privada válida. Cole da linha -----BEGIN até a linha -----END, inclusive."
+  # -P '' e </dev/null: nunca pede senha (no CI o job ficaria travado esperando)
+  if ! ssh-keygen -y -P '' -f "$dir/deploy_key" >/dev/null 2>&1 </dev/null; then
+    # Diagnóstico do FORMATO (nunca o conteúdo)
+    local why="o conteúdo entre BEGIN e END está incompleto ou alterado — copie de novo a chave inteira"
+    if printf '%s' "${VPS_SSH_KEY:-}" | grep -qE '^[[:space:]]*(ssh-ed25519|ssh-rsa|ecdsa-sha2)'; then
+      why="foi colada a chave PÚBLICA (começa com ssh-ed25519). Use a PRIVADA, que começa com -----BEGIN OPENSSH PRIVATE KEY-----"
+    elif ! printf '%s' "${VPS_SSH_KEY:-}" | grep -q 'BEGIN [A-Z ]*PRIVATE KEY'; then
+      why="não encontrei a linha -----BEGIN OPENSSH PRIVATE KEY-----"
+    elif ! printf '%s' "${VPS_SSH_KEY:-}" | grep -q 'END [A-Z ]*PRIVATE KEY'; then
+      why="não encontrei a linha -----END OPENSSH PRIVATE KEY----- (a cópia foi cortada no fim)"
+    elif [[ "$(ssh-keygen -y -P '' -f "$dir/deploy_key" 2>&1 </dev/null || true)" == *passphrase* ]]; then
+      why="a chave tem senha (passphrase); o deploy precisa de uma chave sem senha"
+    fi
+    echo "::error::VPS_SSH_KEY inválida: $why. ($(wc -l < "$dir/deploy_key") linha(s) entre BEGIN e END.)"
     fail=1
   fi
 

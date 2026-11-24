@@ -1,5 +1,9 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch: # botão "Run workflow" (útil para o primeiro deploy)
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -18,3 +22,46 @@ jobs:
       - run: npm test
         env: { TEST_DATABASE_ADMIN_URL: "postgres://postgres@127.0.0.1:5434/postgres" }
       - run: npm run build
+
+  # Publica na VPS SÓ se os testes passaram e SÓ a partir da main.
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    environment: production # dá para exigir aprovação manual em Settings → Environments
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false # nunca interrompe um deploy no meio
+    steps:
+      - name: Verificar secrets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          missing=""
+          for v in VPS_HOST VPS_USER VPS_SSH_KEY VPS_KNOWN_HOSTS; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Faltam secrets do deploy:$missing (veja docs/DEPLOY.md)"
+            exit 1
+          fi
+
+      - name: Publicar na VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Host conhecido fixado (sem StrictHostKeyChecking=no): evita falso servidor no meio
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # A chave só consegue rodar o scripts/deploy.sh na VPS; o argumento é o commit a publicar
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" "$GITHUB_SHA"

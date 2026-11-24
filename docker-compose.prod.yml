@@ -1,0 +1,41 @@
+# Sobreposição de PRODUÇÃO/VPS. Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Acrescenta o Caddy (HTTPS automático com Let's Encrypt) na frente do nginx, liga
+# reinício automático e ajusta a cadeia de proxies (Caddy + nginx = 2 saltos).
+services:
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    depends_on: [web]
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      DOMAIN: "${DOMAIN:?defina DOMAIN no .env, por exemplo crm.suaempresa.com.br}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  postgres:
+    restart: unless-stopped
+
+  api:
+    restart: unless-stopped
+    environment:
+      TRUST_PROXY: "2"
+      COOKIE_SECURE: "true"   # sempre atrás do HTTPS do Caddy
+
+  api-platform:
+    restart: unless-stopped
+    environment:
+      TRUST_PROXY: "2"
+      COOKIE_SECURE: "true"   # sempre atrás do HTTPS do Caddy
+
+  worker:
+    restart: unless-stopped
+
+  web:
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

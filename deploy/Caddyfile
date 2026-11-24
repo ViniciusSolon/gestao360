@@ -1,0 +1,13 @@
+# HTTPS automático (Let's Encrypt) para o domínio em DOMAIN.
+# O DNS do domínio precisa apontar para o IP da VPS ANTES do primeiro "up".
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# O Caddy grava em X-Forwarded-For o IP real do cliente; o nginx acrescenta o do Caddy.
+	reverse_proxy web:80
+}

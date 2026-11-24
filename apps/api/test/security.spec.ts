@@ -195,3 +195,38 @@ describe('SEC-02 — API pública roda sem a credencial BYPASSRLS', () => {
     expect(() => loadConfig({ ...base, WORKER_INLINE: 'true' })).toThrow(/DATABASE_PLATFORM_URL/);
   });
 });
+
+describe('Deploy na VPS — cadeia Caddy → nginx → API (TRUST_PROXY=2)', () => {
+  let t: TestCtx;
+  beforeAll(async () => { t = await createTestApp({ AUTH_RATE_LIMIT_PER_MIN: '3', TRUST_PROXY: '2' }); });
+  afterAll(async () => { await t.app.close(); await t.db.close(); });
+  beforeEach(async () => { await resetDb(t.db); });
+
+  // A API recebe a conexão do nginx (172.18.0.5); o nginx acrescentou o IP do Caddy (172.18.0.9);
+  // o Caddy registrou o IP real do cliente. Tudo que o cliente inventar fica à esquerda.
+  const viaCaddy = (clientIp: string, forjado?: string) =>
+    tryLogin(t, [forjado, clientIp, '172.18.0.9'].filter(Boolean).join(', '), '172.18.0.5');
+
+  it('quando clientes diferentes passam pelo Caddy, então cada um tem a própria cota (não dividem o IP do proxy)', async () => {
+    for (let i = 0; i < 3; i++) await viaCaddy('203.0.113.10');
+    expect((await viaCaddy('203.0.113.10')).statusCode).toBe(429);
+    expect((await viaCaddy('203.0.113.11')).statusCode).toBe(401);
+  });
+
+  it('quando o atacante forja X-Forwarded-For, então continua limitado pelo IP real', async () => {
+    const codes = [];
+    for (let i = 1; i <= 5; i++) codes.push((await viaCaddy('198.51.100.77', `10.9.9.${i}`)).statusCode);
+    expect(codes).toEqual([401, 401, 401, 429, 429]);
+  });
+
+  it('quando grava a auditoria, então registra o IP real do cliente', async () => {
+    await signup(t.app, { email: 'vps@exemplo.com' });
+    await t.app.inject({
+      method: 'POST', url: '/api/auth/login', remoteAddress: '172.18.0.5',
+      headers: { origin: ORIGIN, 'x-forwarded-for': '6.6.6.6, 203.0.113.50, 172.18.0.9' },
+      payload: { email: 'vps@exemplo.com', password: 'senha-forte-123' },
+    });
+    const r = await t.db.platform.query(`SELECT ip FROM audit_log WHERE action = 'user.login'`);
+    expect(r.rows[0].ip).toBe('203.0.113.50');
+  });
+});

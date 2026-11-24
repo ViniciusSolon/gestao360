@@ -40,8 +40,8 @@ services:
       # Sem default: o ambiente precisa ser escolhido explicitamente no .env
       NODE_ENV: ${NODE_ENV:?defina NODE_ENV no .env (development ou production)}
       API_SURFACE: tenant
-      # 1 proxy na frente (nginx do serviço web, que sobrescreve X-Forwarded-For com o IP real)
-      TRUST_PROXY: "1"
+      # Proxies na frente da API: 1 = nginx do serviço web (local). Na VPS o override usa 2 (Caddy + nginx)
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       DATABASE_APP_URL: postgres://g360_app:${DB_APP_PASSWORD:?}@postgres:5432/gestao360
       # A API pública NÃO recebe DATABASE_PLATFORM_URL (BYPASSRLS): o webhook usa a função record_billing_webhook
       BILLING_PROVIDER: ${BILLING_PROVIDER:?defina BILLING_PROVIDER no .env (fake ou stripe)}
@@ -70,7 +70,8 @@ services:
   web:
     build: ./apps/web
     depends_on: [api, api-platform]
-    ports: ["8080:80"]
+    # Só na máquina local; na VPS quem fica exposto é o Caddy (docker-compose.prod.yml)
+    ports: ["127.0.0.1:8080:80"]
 
 volumes:
   pgdata:

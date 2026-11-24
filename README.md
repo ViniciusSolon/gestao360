@@ -75,6 +75,10 @@ cp .env.example .env   # e preencha
 docker compose up --build
 ```
 
+## Deploy na VPS
+
+Push na `main` → testes no GitHub Actions → publicação automática na VPS via SSH, com HTTPS (Caddy) e volta automática se a API não subir. Passo a passo: [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
 ## Testes
 
 Os testes de integração chamam as rotas de verdade contra um Postgres de teste real (só gateway e e-mail são simulados).

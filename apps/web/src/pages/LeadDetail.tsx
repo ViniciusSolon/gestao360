@@ -22,7 +22,13 @@ function CnpjField({ leadId, value, onSaved }: { leadId: string; value: string |
       <div>
         <div className="muted">CNPJ</div>
         {value ? formatCnpj(value) : '—'}{' '}
-        <button type="button" className="secondary" style={{ padding: '.1rem .5rem', fontSize: '.8rem' }} onClick={() => { setV(formatCnpj(value)); setEditing(true); }}>
+        <button
+          type="button"
+          className="secondary"
+          aria-label={value ? 'Editar CNPJ' : 'Adicionar CNPJ'}
+          style={{ padding: '.1rem .5rem', fontSize: '.8rem' }}
+          onClick={() => { setV(formatCnpj(value)); setEditing(true); }}
+        >
           {value ? 'Editar' : 'Adicionar'}
         </button>
       </div>

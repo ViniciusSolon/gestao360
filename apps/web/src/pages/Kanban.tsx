@@ -51,7 +51,7 @@ export function Kanban() {
       <div className="row between">
         <h1>Funil comercial</h1>
         <div className="row">
-          <input placeholder="Buscar nome, empresa ou CNPJ…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
+          <input placeholder="Nome, empresa ou CNPJ" aria-label="Buscar por nome, empresa ou CNPJ" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
           <button onClick={() => setCreating(true)}>+ Novo lead</button>
           {can(me.user.role, 'admin') && <StageAdmin onChange={stages.reload} />}
         </div>

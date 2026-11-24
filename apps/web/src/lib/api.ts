@@ -53,6 +53,21 @@ export function useApi<T>(path: string | null) {
   return { data, error, loading, reload, setData };
 }
 
+/** Nome em português dos campos, para mensagens de validação legíveis. */
+const FIELD_LABELS: Record<string, string> = {
+  cnpj: 'CNPJ', email: 'E-mail', name: 'Nome', company: 'Empresa', phone: 'Telefone', password: 'Senha',
+  slug: 'Identificador', companyName: 'Empresa', valueCents: 'Valor', priceCents: 'Preço', sku: 'SKU', ncm: 'NCM',
+  photoUrl: 'Foto', meetingUrl: 'Link da reunião', title: 'Título', freightCents: 'Frete', quantity: 'Quantidade',
+};
+
+/** "cnpj" + "CNPJ inválido" → "CNPJ inválido"; "email" + "Invalid email" → "E-mail: Invalid email". */
+function describeIssue(i: { path: string; message: string }): string {
+  const field = i.path.split('.').pop() ?? '';
+  const label = FIELD_LABELS[field] ?? i.path;
+  if (!label || i.message.toLowerCase().includes(label.toLowerCase())) return i.message;
+  return `${label}: ${i.message}`;
+}
+
 /**
  * Envio de formulário: desabilita o botão enquanto envia (conforto de UX).
  * A proteção real contra duplicidade está no servidor/banco.
@@ -71,7 +86,7 @@ export function useSubmit<A extends unknown[], R>(fn: (...args: A) => Promise<R>
         return await fn(...args);
       } catch (e) {
         const err = e as ApiError;
-        setError(err.issues?.length ? `${err.message}: ${err.issues.map((i) => `${i.path} ${i.message}`).join('; ')}` : err.message);
+        setError(err.issues?.length ? err.issues.map(describeIssue).join('; ') : err.message);
         return undefined;
       } finally {
         inFlight.current = false;

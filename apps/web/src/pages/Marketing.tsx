@@ -203,11 +203,13 @@ const SERIES = [
   { key: 'gains', label: 'Gains', color: 'var(--s3)' },
 ] as const;
 
-function niceMax(v: number) {
-  if (v <= 4) return 4;
-  const p = 10 ** Math.floor(Math.log10(v));
-  const n = Math.ceil(v / p);
-  return (n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+/** Escala com passos redondos (1, 2 ou 5 × 10ⁿ) e no máximo ~5 marcas inteiras. */
+function niceScale(v: number) {
+  const raw = Math.max(1, v) / 4;
+  const p = 10 ** Math.floor(Math.log10(raw));
+  const step = Math.max(1, [1, 2, 5, 10].map((m) => m * p).find((x) => x >= raw) ?? 10 * p);
+  const max = Math.ceil(Math.max(1, v) / step) * step;
+  return { max, ticks: Array.from({ length: Math.round(max / step) + 1 }, (_, i) => i * step) };
 }
 
 function StackedBars({ rows }: { rows: SourceRow[] }) {
@@ -215,11 +217,10 @@ function StackedBars({ rows }: { rows: SourceRow[] }) {
   const data = rows.filter((r) => r.leads + r.deals + r.gains > 0).slice(0, 8);
   if (!data.length) return <div className="muted" style={{ padding: '2rem 0' }}>Sem leads no período.</div>;
   const W = 560, H = 240, L = 36, B = 34, T = 8;
-  const max = niceMax(Math.max(...data.map((r) => r.leads + r.deals + r.gains)));
+  const { max, ticks } = niceScale(Math.max(...data.map((r) => r.leads + r.deals + r.gains)));
   const slot = (W - L) / data.length;
   const bw = Math.min(64, slot * 0.6);
   const y = (v: number) => T + (H - T - B) * (1 - v / max);
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(max * f));
   return (
     <div className="chart" onMouseLeave={() => setTip(null)}>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Leads, deals e ganhos empilhados por fonte">

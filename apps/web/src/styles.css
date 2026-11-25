@@ -120,14 +120,14 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .mk-filters input[type=date] { width: 150px; }
 .mk-filters select { width: auto; }
 .mk-legend { font-size: .75rem; color: var(--muted); margin: .25rem 0 1rem; }
-.mk-kpis { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.mk-kpis { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); }
 .mk-kpi { all: unset; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: .8rem .9rem; display: grid; gap: .2rem; align-content: start; min-height: 104px; }
 .mk-kpi.editable { cursor: pointer; }
 .mk-kpi.editable:hover { border-color: var(--primary); }
 .mk-kpi:focus-visible { outline: 2px solid var(--primary); }
 .mk-kpi.has-goal { background: var(--goal-bg); border-color: var(--goal-border); }
 .mk-kpi .k { font-size: .72rem; letter-spacing: .05em; color: var(--muted); text-transform: uppercase; }
-.mk-kpi .v { font-size: 1.35rem; font-weight: 700; display: flex; gap: .4rem; align-items: baseline; flex-wrap: wrap; }
+.mk-kpi .v { font-size: 1.2rem; font-weight: 700; display: flex; gap: .4rem; align-items: baseline; flex-wrap: wrap; }
 .mk-kpi .g { font-size: .72rem; color: var(--muted); }
 .delta { font-size: .75rem; font-weight: 600; white-space: nowrap; }
 .delta.good { color: var(--good); } .delta.bad { color: var(--bad); } .delta.flat { color: var(--muted); }

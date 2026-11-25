@@ -65,6 +65,8 @@ App dos clientes: http://localhost:5173 · Painel da plataforma: http://localhos
 | `API_SURFACE` | `tenant` (padrão), `platform` ou `all` | Produção: processos separados; `all` só em dev |
 | `DATABASE_PLATFORM_URL` | Credencial BYPASSRLS | Só no painel e no worker, **nunca** na API pública |
 | `PLATFORM_MFA_KEY` | Cifra os segredos TOTP | 64 hex, guardada em cofre |
+| `CHANNEL_SECRETS_KEY` | Cifra os tokens de Resend/Meta/Zenvia de cada cliente (Campanhas) | 64 hex (`openssl rand -hex 32`); não trocar depois de usar |
+| `MESSAGING_MODE` | `live` envia de verdade; `fake` simula | `fake` só é aceito em development |
 | `TRUST_PROXY` | Quantos proxies há na frente (para ler o IP real) | `false` sem proxy; `1` atrás do nginx; nunca `true` |
 | `AUTH_RATE_LIMIT_PER_MIN` / `AUTH_EMAIL_LIMIT_PER_15MIN` | Tentativas de login por IP e por e-mail (no Postgres) | 10 / 20 |
 | `ENABLE_FAKE_CHECKOUT` | Botão "Simular pagamento" | Só `true` em development com gateway fake |

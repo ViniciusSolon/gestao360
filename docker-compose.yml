@@ -51,6 +51,12 @@ services:
       BILLING_WEBHOOK_SECRET: ${BILLING_WEBHOOK_SECRET:?defina no .env}
       WEB_ORIGINS: ${WEB_ORIGINS:-http://localhost:8080}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8080}
+      # Campanhas: cifra os tokens de Resend/Meta/Zenvia de cada cliente (openssl rand -hex 32).
+      # Sem ela, a tela Canais avisa "servidor não pronto" e nenhum token é gravado.
+      CHANNEL_SECRETS_KEY: ${CHANNEL_SECRETS_KEY:-}
+      # live = envia de verdade; fake = simula (só aceito com NODE_ENV=development)
+      MESSAGING_MODE: ${MESSAGING_MODE:-live}
+      WHATSAPP_GRAPH_VERSION: ${WHATSAPP_GRAPH_VERSION:-v23.0}
 
   api-platform:
     <<: *api

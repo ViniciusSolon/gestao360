@@ -99,6 +99,8 @@ DB_PLATFORM_PASSWORD=$(openssl rand -hex 24)
 # producao: troque pelo "Signing secret" (whsec_...) do webhook criado na Stripe
 BILLING_WEBHOOK_SECRET=$(openssl rand -hex 24)
 PLATFORM_MFA_KEY=$(openssl rand -hex 32)
+# Cifra os tokens dos canais de campanha (Resend/Meta/Zenvia) de cada cliente. Não troque depois de usar.
+CHANNEL_SECRETS_KEY=$(openssl rand -hex 32)
 EOF
     chown "$DEPLOY_USER:$DEPLOY_USER" "$envfile"
     chmod 600 "$envfile"

@@ -14,6 +14,8 @@ import { Proposals, ProposalNew, ProposalView } from './pages/Proposals';
 import { Dashboard } from './pages/Dashboard';
 import { IndicadoresIndex, Marketing } from './pages/Marketing';
 import { Team } from './pages/Team';
+import { CampaignEditor, CampaignsHome, CampaignView, Unsubscribe } from './pages/Campaigns';
+import { Channels } from './pages/Channels';
 import { Billing, FakeCheckout } from './pages/Billing';
 import { AdminLayout, AdminLogin } from './admin/AdminLayout';
 import { AdminTenants } from './admin/AdminTenants';
@@ -29,11 +31,18 @@ createRoot(document.getElementById('root')!).render(
         {/* Não há cadastro público: links antigos vão para o login */}
         <Route path="/cadastro" element={<Navigate to="/login" replace />} />
         <Route path="/convite" element={<AcceptInvite />} />
+        <Route path="/descadastro" element={<Unsubscribe />} />
         <Route path="/app" element={<SessionProvider><AppLayout /></SessionProvider>}>
           <Route index element={<IndicadoresIndex />} />
           <Route path="indicadores" element={<IndicadoresIndex />} />
           <Route path="indicadores/marketing" element={<Marketing />} />
           <Route path="indicadores/comercial" element={<Dashboard />} />
+          <Route path="marketing" element={<Navigate to="/app/marketing/campanhas" replace />} />
+          <Route path="marketing/campanhas" element={<CampaignsHome />} />
+          <Route path="marketing/campanhas/nova" element={<CampaignEditor />} />
+          <Route path="marketing/campanhas/:id" element={<CampaignView />} />
+          <Route path="marketing/campanhas/:id/editar" element={<CampaignEditor />} />
+          <Route path="marketing/canais" element={<Channels />} />
           <Route path="funil" element={<Kanban />} />
           <Route path="leads/:id" element={<LeadDetail />} />
           <Route path="agenda" element={<Activities />} />

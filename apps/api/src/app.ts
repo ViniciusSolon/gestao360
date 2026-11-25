@@ -14,6 +14,8 @@ import { productRoutes } from './modules/products.js';
 import { proposalRoutes } from './modules/proposals.js';
 import { dashboardRoutes } from './modules/dashboard.js';
 import { marketingRoutes } from './modules/marketing.js';
+import { channelRoutes } from './modules/channels.js';
+import { campaignRoutes, publicRoutes } from './modules/campaigns.js';
 import { billingRoutes } from './modules/billing.js';
 import { webhookRoutes } from './modules/webhooks.js';
 import { platformRoutes } from './modules/platform.js';
@@ -83,11 +85,15 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
         await proposalRoutes(api, deps);
         await dashboardRoutes(api, deps);
         await marketingRoutes(api, deps);
+        await channelRoutes(api, deps);
+        await campaignRoutes(api, deps);
         await billingRoutes(api, deps);
       },
       { prefix: '/api' },
     );
     await app.register(async (wh) => webhookRoutes(wh, deps), { prefix: '/api/webhooks' });
+    // Sem login (descadastro pelo link do e-mail)
+    await app.register(async (pub) => publicRoutes(pub, deps), { prefix: '/api/public' });
   }
   if (surface === 'platform' || surface === 'all') {
     await app.register(async (p) => platformRoutes(p, deps), { prefix: '/api/platform' });

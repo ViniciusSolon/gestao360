@@ -9,10 +9,12 @@ import { FakeGateway, signPayload } from '../src/billing/gateway.js';
 import type { EmailMessage, EmailSender } from '../src/email/email.js';
 import type { Deps } from '../src/deps.js';
 import { provisionTenant } from '../src/lib/tenants.js';
+import { FakeProviders } from '../src/messaging/providers.js';
 
 export const WEBHOOK_SECRET = 'whsec_test_' + 'x'.repeat(32);
 export const ORIGIN = 'http://localhost:5173';
 export const MFA_KEY = 'ab'.repeat(32);
+export const CHANNEL_KEY = 'cd'.repeat(32);
 
 /** Serviço externo simulado: e-mail (só registra o que seria enviado). */
 export class RecordingEmail implements EmailSender {
@@ -31,6 +33,7 @@ export interface TestCtx {
   gateway: FakeGateway;
   email: RecordingEmail;
   db: Db;
+  messaging: FakeProviders;
 }
 
 export async function createTestApp(env: Record<string, string | undefined> = {}): Promise<TestCtx> {
@@ -44,15 +47,18 @@ export async function createTestApp(env: Record<string, string | undefined> = {}
     WEB_ORIGINS: ORIGIN,
     API_SURFACE: 'all',
     PLATFORM_MFA_KEY: MFA_KEY,
+    CHANNEL_SECRETS_KEY: CHANNEL_KEY,
+    MESSAGING_MODE: 'fake',
     AUTH_RATE_LIMIT_PER_MIN: '10000',
     ...env,
   });
   const db = new Db(config.DATABASE_APP_URL, config.DATABASE_PLATFORM_URL, config.DB_POOL_MAX);
   const gateway = new FakeGateway();
   const email = new RecordingEmail();
-  const deps: Deps = { config, db, gateway, email };
+  const messaging = new FakeProviders();
+  const deps: Deps = { config, db, gateway, email, messaging };
   const app = await buildApp(deps);
-  const ctx = { app, deps, gateway, email, db };
+  const ctx = { app, deps, gateway, email, db, messaging };
   ctxByApp.set(app, ctx);
   return ctx;
 }

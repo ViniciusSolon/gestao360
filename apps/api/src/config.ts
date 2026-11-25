@@ -47,6 +47,15 @@ const schema = z
     AUTH_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(10),
     /** Tentativas por e-mail a cada 15 min (login/cadastro), somadas ao limite por IP */
     AUTH_EMAIL_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(20),
+    /** Chave AES-256 (64 hex) que cifra os tokens de Resend/Meta/Zenvia de cada empresa e assina links de descadastro. */
+    CHANNEL_SECRETS_KEY: z
+      .string()
+      .regex(/^[0-9a-fA-F]{64}$/, 'CHANNEL_SECRETS_KEY precisa ter 64 caracteres hexadecimais (openssl rand -hex 32)')
+      .optional(),
+    /** live = envia de verdade; fake = só registra (permitido apenas em development/test). */
+    MESSAGING_MODE: z.enum(['live', 'fake']).default('live'),
+    /** Versão da Graph API da Meta para o WhatsApp (confira a vigente em developers.facebook.com). */
+    WHATSAPP_GRAPH_VERSION: z.string().regex(/^v\d+\.\d+$/, 'Use o formato v23.0').default('v23.0'),
     /** Chave AES-256 (64 caracteres hex) que cifra os segredos TOTP do painel. Obrigatória com o painel. */
     PLATFORM_MFA_KEY: z
       .string()
@@ -72,6 +81,9 @@ const schema = z
     APP_PUBLIC_URL: z.string().url().default('http://localhost:5173'),
   })
   .superRefine((cfg, ctx) => {
+    if (cfg.MESSAGING_MODE === 'fake' && cfg.NODE_ENV !== 'development' && cfg.NODE_ENV !== 'test') {
+      ctx.addIssue({ code: 'custom', path: ['MESSAGING_MODE'], message: 'envio fake só é permitido com NODE_ENV=development ou test' });
+    }
     if (!cfg.PLATFORM_MFA_KEY && cfg.API_SURFACE !== 'tenant') {
       ctx.addIssue({ code: 'custom', path: ['PLATFORM_MFA_KEY'], message: 'obrigatória com API_SURFACE=platform|all (MFA do painel)' });
     }

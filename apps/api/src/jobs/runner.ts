@@ -1,12 +1,14 @@
 import type { Deps } from '../deps.js';
 import { syncSubscription } from '../billing/sync.js';
 import { templates } from '../email/email.js';
+import { dispatchCampaign } from '../messaging/dispatch.js';
 
 type Handler = (deps: Deps, payload: any) => Promise<void>;
 
 export const handlers: Record<string, Handler> = {
   'billing.sync_subscription': (deps, p) => syncSubscription(deps, p.subscriptionId),
   'email.invite': (deps, p) => deps.email.send({ to: p.to, ...templates.invite(p) }),
+  'campaign.dispatch': (deps, p) => dispatchCampaign(deps, p.campaignId, p.run ?? 0),
   'email.owner_access': (deps, p) => deps.email.send({ to: p.to, ...templates.ownerAccess(p) }),
   'email.subscription_active': (deps, p) => deps.email.send({ to: p.to, ...templates.subscriptionActive(p) }),
 };

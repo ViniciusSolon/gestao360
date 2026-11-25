@@ -2,7 +2,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api, brl, dateBR, useApi, useIdempotencyKey, useSubmit } from '../lib/api';
 import { useSession } from '../lib/session';
 
-const STATUS: Record<string, string> = { trialing: 'Período de teste', active: 'Ativa', past_due: 'Pagamento pendente', suspended: 'Suspensa', canceled: 'Cancelada' };
+const STATUS: Record<string, string> = { trialing: 'Ativa', active: 'Ativa', past_due: 'Pagamento pendente', suspended: 'Suspensa', canceled: 'Cancelada' };
 
 export function Billing() {
   const { me } = useSession();
@@ -21,7 +21,6 @@ export function Billing() {
       <div className="card form-grid">
         <div><div className="muted">Plano</div>{t.plan_name}</div>
         <div><div className="muted">Situação</div><span className={`badge ${t.status}`}>{STATUS[t.status] ?? t.status}</span></div>
-        {t.status === 'trialing' && <div><div className="muted">Teste até</div>{dateBR(t.trial_ends_at)}</div>}
         <div><div className="muted">Usuários</div>{t.seats_used} / {t.max_users}</div>
         <div><div className="muted">Leads</div>{t.leads_count} / {t.max_leads ?? '∞'}</div>
       </div>

@@ -12,6 +12,7 @@ import { Activities } from './pages/Activities';
 import { Products } from './pages/Products';
 import { Proposals, ProposalNew, ProposalView } from './pages/Proposals';
 import { Dashboard } from './pages/Dashboard';
+import { IndicadoresIndex, Marketing } from './pages/Marketing';
 import { Team } from './pages/Team';
 import { Billing, FakeCheckout } from './pages/Billing';
 import { AdminLayout, AdminLogin } from './admin/AdminLayout';
@@ -25,10 +26,14 @@ createRoot(document.getElementById('root')!).render(
       <Routes>
         <Route path="/" element={<Navigate to="/app" replace />} />
         <Route path="/login" element={<AuthPage mode="login" />} />
-        <Route path="/cadastro" element={<AuthPage mode="signup" />} />
+        {/* Não há cadastro público: links antigos vão para o login */}
+        <Route path="/cadastro" element={<Navigate to="/login" replace />} />
         <Route path="/convite" element={<AcceptInvite />} />
         <Route path="/app" element={<SessionProvider><AppLayout /></SessionProvider>}>
-          <Route index element={<Dashboard />} />
+          <Route index element={<IndicadoresIndex />} />
+          <Route path="indicadores" element={<IndicadoresIndex />} />
+          <Route path="indicadores/marketing" element={<Marketing />} />
+          <Route path="indicadores/comercial" element={<Dashboard />} />
           <Route path="funil" element={<Kanban />} />
           <Route path="leads/:id" element={<LeadDetail />} />
           <Route path="agenda" element={<Activities />} />

@@ -5,16 +5,24 @@ import { authOf } from '../auth/guards.js';
 import { notFound } from '../lib/errors.js';
 import { guard, idParam, optionalText, params } from './common.js';
 
-const productBody = z.object({
+/** Campos do produto SEM padrão (base da edição parcial). */
+const productFields = z.object({
   sku: z.string().trim().min(1).max(60),
   name: z.string().trim().min(1).max(200),
   description: optionalText(2000),
   priceCents: z.number().int().min(0).max(1e12),
   ncm: z.string().regex(/^[0-9]{8}$/, 'NCM deve ter 8 dígitos').optional().nullable(),
-  taxRateBp: z.number().int().min(0).max(10000).default(0),
+  taxRateBp: z.number().int().min(0).max(10000),
   photoUrl: z.string().url().max(500).regex(/^https:\/\//, 'Use um link https').optional().nullable(),
+  active: z.boolean(),
+});
+/** Criação: padrões só aqui. */
+const productBody = productFields.extend({
+  taxRateBp: z.number().int().min(0).max(10000).default(0),
   active: z.boolean().default(true),
 });
+/** Edição: sem padrões, senão ativar/desativar zerava o tributo e editar reativava o produto. */
+const productPatch = productFields.partial();
 
 export async function productRoutes(app: FastifyInstance, deps: Deps) {
   const { db } = deps;
@@ -49,7 +57,7 @@ export async function productRoutes(app: FastifyInstance, deps: Deps) {
   app.patch('/products/:id', { preHandler: guard(deps, 'manager') }, async (req) => {
     const a = authOf(req);
     const { id } = params(idParam, req);
-    const b = productBody.partial().parse(req.body);
+    const b = productPatch.parse(req.body);
     return db.withAuth(a, async (c) => {
       const r = await c.query(
         `UPDATE products SET sku = coalesce($2, sku), name = coalesce($3, name), description = coalesce($4, description),

@@ -74,7 +74,7 @@ export function LeadDetail() {
         <CnpjField leadId={lead.id} value={lead.cnpj} onSaved={reload} />
         <div><div className="muted">E-mail</div>{lead.email ?? '—'}</div>
         <div><div className="muted">Telefone</div>{lead.phone ?? '—'}</div>
-        <div><div className="muted">Canal</div>{CHANNELS[lead.channel] ?? lead.channel}</div>
+        <div><div className="muted">Fonte</div>{CHANNELS[lead.channel] ?? lead.channel}{lead.campaign ? ` · ${lead.campaign}` : ''}</div>
         <div><div className="muted">Valor</div>{brl(lead.value_cents)}</div>
         <div><div className="muted">Pontuação</div>{lead.score} {lead.is_mql && <span className="badge">MQL</span>}</div>
         <div><div className="muted">Previsão</div>{dateBR(lead.expected_close_date)}</div>

@@ -34,7 +34,7 @@ export function Dashboard() {
   return (
     <div>
       <div className="row between">
-        <h1>Indicadores <span className="muted" style={{ fontSize: '.9rem' }}>({data.period.scope})</span></h1>
+        <h1>Comercial <span className="muted" style={{ fontSize: '.9rem' }}>({data.period.scope})</span></h1>
         <div className="row">
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />

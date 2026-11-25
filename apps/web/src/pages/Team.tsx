@@ -7,13 +7,15 @@ export function Team() {
   const users = useApi<any[]>('/users');
   const invites = useApi<any[]>('/invites');
   const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('seller');
   const [lastUrl, setLastUrl] = useState<string | null>(null);
   const invite = useSubmit(async (e: FormEvent) => {
     e.preventDefault();
-    const r = await api('/invites', { method: 'POST', body: { email, role } });
+    const r = await api('/invites', { method: 'POST', body: { email, role, name: name || undefined } });
     setLastUrl(r.url);
     setEmail('');
+    setName('');
     invites.reload();
   });
   const update = useSubmit(async (id: string, body: object) => {
@@ -25,6 +27,7 @@ export function Team() {
     <div className="stack">
       <h1>Equipe</h1>
       <form className="card form-grid" onSubmit={invite.run}>
+        <label>Nome (opcional)<input value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label>E-mail<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
         <label>Papel<select value={role} onChange={(e) => setRole(e.target.value as Role)}>{roles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}</select></label>
         <div className="row" style={{ alignSelf: 'end' }}><button disabled={invite.busy}>Convidar</button></div>

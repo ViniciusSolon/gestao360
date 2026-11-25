@@ -80,3 +80,74 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   .side .spacer, .side .tenant { display: none; }
   .main { padding: 1rem; }
 }
+
+/* Tela de link de acesso / convite */
+.welcome { max-width: 460px; }
+.welcome-head { text-align: center; margin-bottom: 1rem; }
+.welcome-head h1 { margin-bottom: .35rem; }
+.welcome-head p { margin: 0; }
+.invite-box { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; display: grid; gap: .3rem; }
+.invite-title { font-size: .85rem; }
+.invite-name { font-size: 1.05rem; font-weight: 600; }
+.badge.role { justify-self: start; margin-top: .25rem; background: var(--primary); color: #fff; }
+
+/* Menu lateral: grupo expansível */
+.nav-group > button { all: unset; box-sizing: border-box; width: 100%; display: flex; justify-content: space-between; align-items: center; padding: .5rem .6rem; border-radius: 8px; cursor: pointer; color: var(--text); }
+.nav-group > button:hover, .side a:hover { background: var(--bg); }
+.nav-group > button:focus-visible { outline: 2px solid var(--primary); }
+.nav-group.open > button { font-weight: 600; }
+.nav-sub { display: grid; gap: .15rem; margin: .15rem 0 .25rem .75rem; padding-left: .5rem; border-left: 2px solid var(--border); }
+.nav-sub a { font-size: .92rem; }
+.chev { transition: transform .15s; font-size: .8rem; }
+.nav-group.open .chev { transform: rotate(180deg); }
+
+/* Séries de gráficos (paleta categórica validada; ordem fixa) */
+:root {
+  --s1: #2a78d6; --s2: #1baf7a; --s3: #eb6834; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --s-other: #9aa3b2; --good: #047857; --bad: #b91c1c; --goal-bg: #fef9e7; --goal-border: #f3d87a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --s1: #3987e5; --s2: #199e70; --s3: #d95926; --s4: #c98500; --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767;
+    --s-other: #6b7280; --good: #34d399; --bad: #f87171; --goal-bg: #2a2410; --goal-border: #6b5a1c;
+  }
+}
+
+/* Painel de Marketing */
+.mk-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin-bottom: .75rem; }
+.mk-head h1 { margin: 0; }
+.mk-filters { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.mk-filters input[type=date] { width: 150px; }
+.mk-filters select { width: auto; }
+.mk-legend { font-size: .75rem; color: var(--muted); margin: .25rem 0 1rem; }
+.mk-kpis { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.mk-kpi { all: unset; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: .8rem .9rem; display: grid; gap: .2rem; align-content: start; min-height: 104px; }
+.mk-kpi.editable { cursor: pointer; }
+.mk-kpi.editable:hover { border-color: var(--primary); }
+.mk-kpi:focus-visible { outline: 2px solid var(--primary); }
+.mk-kpi.has-goal { background: var(--goal-bg); border-color: var(--goal-border); }
+.mk-kpi .k { font-size: .72rem; letter-spacing: .05em; color: var(--muted); text-transform: uppercase; }
+.mk-kpi .v { font-size: 1.35rem; font-weight: 700; display: flex; gap: .4rem; align-items: baseline; flex-wrap: wrap; }
+.mk-kpi .g { font-size: .72rem; color: var(--muted); }
+.delta { font-size: .75rem; font-weight: 600; white-space: nowrap; }
+.delta.good { color: var(--good); } .delta.bad { color: var(--bad); } .delta.flat { color: var(--muted); }
+.progress { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: .25rem; }
+.progress > span { display: block; height: 100%; background: var(--primary); border-radius: 3px; }
+.progress.over > span { background: var(--bad); }
+.mk-charts { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); margin-top: 1rem; }
+.chart { position: relative; }
+.chart h3 { font-size: .95rem; margin: 0 0 .5rem; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart .axis text, .chart .lbl { font-size: 11px; fill: var(--muted); }
+.chart .axis line { stroke: var(--border); }
+.chart .legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .8rem; color: var(--muted); margin-top: .5rem; }
+.chart .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: .35rem; vertical-align: -1px; }
+.chart .tip { position: absolute; pointer-events: none; background: var(--text); color: var(--bg); font-size: .78rem; padding: .4rem .55rem; border-radius: 6px; white-space: nowrap; transform: translate(-50%, -110%); z-index: 2; }
+.mk-table { margin-top: 1rem; overflow-x: auto; }
+.mk-table table { min-width: 860px; }
+.mk-table td small { display: block; font-size: .7rem; }
+.mk-table tr.total td { font-weight: 700; background: var(--bg); }
+.mk-table tr.camp td:first-child { padding-left: 2.2rem; color: var(--muted); }
+.mk-table button.expand { all: unset; cursor: pointer; width: 1.2rem; display: inline-block; color: var(--muted); }
+.mk-table button.expand:focus-visible { outline: 2px solid var(--primary); }
+.mk-spend { margin-top: 1rem; }

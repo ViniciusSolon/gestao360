@@ -26,6 +26,14 @@ export const templates = {
 <p><a href="${p.url}">Aceitar convite</a></p><p>O link expira em 7 dias.</p>`,
     };
   },
+  ownerAccess(p: { name: string; tenantName: string; url: string }): Omit<EmailMessage, 'to'> {
+    return {
+      subject: `Seu acesso à Gestão 360° — ${p.tenantName}`,
+      html: html`<p>Olá, ${p.name}!</p>
+<p>A conta da <strong>${p.tenantName}</strong> na Gestão 360° está pronta. Defina sua senha para entrar:</p>
+<p><a href="${p.url}">Definir minha senha</a></p><p>O link vale por 7 dias e pode ser usado uma única vez.</p>`,
+    };
+  },
   subscriptionActive(p: { tenantName: string; planName: string }): Omit<EmailMessage, 'to'> {
     return {
       subject: 'Assinatura ativada',

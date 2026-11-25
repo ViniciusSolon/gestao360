@@ -3,6 +3,41 @@ import { useOutletContext, useParams } from 'react-router-dom';
 import { api, brl, dateBR, dateTimeBR, useApi, useSubmit } from '../lib/api';
 import type { PlatformMe } from './AdminLayout';
 
+/** Responsável que ainda não definiu a senha: mostra o link pendente e permite gerar outro. */
+function PendingOwner({ tenantId, owner, canAct }: { tenantId: string; owner: { name: string; email: string; expires_at: string }; canAct: boolean }) {
+  const [link, setLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const gen = useSubmit(async () => {
+    const r = await api<{ accessUrl: string }>(`/platform/tenants/${tenantId}/owner-link`, { method: 'POST' });
+    setLink(r.accessUrl);
+    setCopied(false);
+  });
+  const expired = new Date(owner.expires_at).getTime() < Date.now();
+  return (
+    <div className="banner stack" style={{ gap: '.5rem' }}>
+      <div>
+        <strong>{owner.name}</strong> ({owner.email}) ainda não definiu a senha.{' '}
+        {expired ? 'O link venceu.' : `O link vale até ${dateBR(owner.expires_at)}.`}
+      </div>
+      {canAct && (
+        <div className="row">
+          <button disabled={gen.busy} onClick={() => gen.run()}>Gerar novo link de acesso</button>
+          <span className="muted" style={{ fontSize: '.8rem' }}>O link anterior deixa de valer.</span>
+        </div>
+      )}
+      {link && (
+        <div className="row">
+          <input readOnly value={link} onFocus={(e) => e.target.select()} aria-label="Novo link de acesso" style={{ flex: 1, minWidth: 260 }} />
+          <button className="secondary" onClick={async () => { try { await navigator.clipboard.writeText(link); setCopied(true); } catch { /* copia manual */ } }}>
+            {copied ? 'Copiado!' : 'Copiar'}
+          </button>
+        </div>
+      )}
+      {gen.error && <div className="error">{gen.error}</div>}
+    </div>
+  );
+}
+
 export function AdminTenant() {
   const { id } = useParams();
   const me = useOutletContext<PlatformMe>();
@@ -26,11 +61,12 @@ export function AdminTenant() {
         <div><div className="muted">Plano</div>{t.plan_name} ({brl(t.price_cents)})</div>
         <div><div className="muted">Usuários</div>{t.seats_used}/{t.max_users}</div>
         <div><div className="muted">Leads</div>{t.leads_count}/{t.max_leads ?? '∞'}</div>
-        <div><div className="muted">Trial até</div>{dateBR(t.trial_ends_at)}</div>
         <div><div className="muted">Assinatura</div>{data.subscription ? `${data.subscription.status} até ${dateBR(data.subscription.current_period_end)}` : '—'}</div>
         <div><div className="muted">Uso</div>{data.usage.proposals} propostas · {data.usage.activities} atividades · {data.usage.won} ganhos</div>
         {t.suspended_reason && <div><div className="muted">Motivo da suspensão</div>{t.suspended_reason}</div>}
       </div>
+
+      {data.pendingOwner && <PendingOwner tenantId={t.id} owner={data.pendingOwner} canAct={isSuper} />}
 
       {isSuper ? (
         <div className="card stack">
@@ -39,7 +75,6 @@ export function AdminTenant() {
           <div className="row">
             {t.status !== 'suspended' && <button className="danger" disabled={action.busy} onClick={() => action.run('status', { status: 'suspended' })}>Suspender</button>}
             {t.status !== 'active' && <button disabled={action.busy} onClick={() => action.run('status', { status: 'active' })}>Ativar</button>}
-            {t.status === 'trialing' && <button className="secondary" disabled={action.busy} onClick={() => action.run('trial', { days: 14 })}>+14 dias de trial</button>}
             <select disabled={action.busy} value="" onChange={(e) => e.target.value && action.run('plan', { planCode: e.target.value })} style={{ maxWidth: 220 }}>
               <option value="">Trocar plano…</option>
               {(plans.data ?? []).map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}

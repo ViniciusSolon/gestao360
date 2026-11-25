@@ -1,10 +1,11 @@
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
-import { addMember, call, cookieOf, createLead, createTestApp, MFA_KEY, ORIGIN, resetDb, signup, stages, type TestCtx } from './helpers.js';
+import { addMember, call, cookieOf, createLead, createProduct, createTestApp, MFA_KEY, ORIGIN, resetDb, signup, stages, type TestCtx } from './helpers.js';
 import { loadConfig } from '../src/config.js';
 import { provisionPlatformAdmin } from '../src/lib/platform-admin.js';
 import { base32Decode, base32Encode, decryptSecret, encryptSecret, hotp, totp } from '../src/lib/totp.js';
 import { purgeExpired } from '../src/jobs/runner.js';
+import { provisionTenant } from '../src/lib/tenants.js';
 
 let t: TestCtx;
 beforeAll(async () => { t = await createTestApp(); });
@@ -230,12 +231,13 @@ describe('SEC-10 — rate limit no banco (por e-mail e entre réplicas)', () => 
 
 // ---------------------------------------------------------------------------
 describe('SEC-11 — erros não expõem nomes internos', () => {
-  it('quando o cadastro repete e-mail, então o código é genérico (sem nome de constraint)', async () => {
-    await signup(t.app, { email: 'dup2@exemplo.com' });
-    const r = await post(t.app, '/api/auth/signup', { companyName: 'Outra', slug: 'outra-co', name: 'A', email: 'dup2@exemplo.com', password: 'senha-forte-123' });
+  it('quando um registro único se repete (SKU de produto), então o código é genérico (sem nome de constraint)', async () => {
+    const s = await signup(t.app);
+    await createProduct(t.app, s, { sku: 'DUP-1' });
+    const r = await call(t.app, s, 'POST', '/api/products', { sku: 'dup-1', name: 'Outro', priceCents: 100 });
     expect(r.statusCode).toBe(409);
     expect(r.json().error).toBe('duplicate');
-    expect(r.body).not.toMatch(/users_|_uq|constraint/);
+    expect(r.body).not.toMatch(/products_|_uq|constraint/);
   });
 });
 
@@ -244,7 +246,10 @@ describe('SEC-12 — cookies com prefixo em HTTPS e limpeza de sessões', () => 
   it('quando COOKIE_SECURE=true, então a sessão usa __Host- (Secure, Path=/) e o painel __Secure-', async () => {
     const a = await createTestApp({ COOKIE_SECURE: 'true' });
     try {
-      const s = await post(a.app, '/api/auth/signup', { companyName: 'Seg Co', slug: 'seg-co', name: 'A', email: 'seg@exemplo.com', password: 'senha-forte-123' });
+      const created = await a.db.withPlatform((c) =>
+        provisionTenant(c, { companyName: 'Seg Co', slug: 'seg-co', ownerName: 'A', ownerEmail: 'seg@exemplo.com', planCode: 'starter' }, 'http://localhost:5173', null),
+      );
+      const s = await post(a.app, '/api/auth/accept-invite', { token: new URL(created.url).searchParams.get('token'), password: 'senha-forte-123' });
       const ck = s.cookies.find((c) => c.name === '__Host-g360_sid')!;
       expect(ck).toBeDefined();
       expect([ck.secure, ck.path, ck.domain]).toEqual([true, '/', undefined]);

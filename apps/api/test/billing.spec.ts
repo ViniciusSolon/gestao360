@@ -102,7 +102,7 @@ describe('Webhook de pagamento', () => {
     await drainJobs(t.deps);
     const jobs = await t.db.platform.query(`SELECT count(*) FROM jobs WHERE type = 'billing.sync_subscription'`);
     expect(Number(jobs.rows[0].count)).toBe(1);
-    expect(t.email.sent).toHaveLength(1);
+    expect(t.email.sent.filter((m) => m.subject === 'Assinatura ativada')).toHaveLength(1);
     expect((await tenantRow(s.tenantId)).status).toBe('active');
   });
 
@@ -115,7 +115,7 @@ describe('Webhook de pagamento', () => {
     await drainJobs(t.deps);
     const n = await t.db.platform.query('SELECT count(*) FROM webhook_events');
     expect(Number(n.rows[0].count)).toBe(1);
-    expect(t.email.sent).toHaveLength(1);
+    expect(t.email.sent.filter((m) => m.subject === 'Assinatura ativada')).toHaveLength(1);
   });
 
   it('quando eventos diferentes da mesma assinatura chegam fora de ordem, então vale o estado atual do gateway', async () => {
@@ -128,7 +128,7 @@ describe('Webhook de pagamento', () => {
     await signedWebhook(t.app, created);
     await drainJobs(t.deps);
     expect((await tenantRow(s.tenantId)).status).toBe('canceled');
-    expect(t.email.sent).toHaveLength(0);
+    expect(t.email.sent.filter((m) => m.subject === 'Assinatura ativada')).toHaveLength(0);
   });
 
   it('quando a conta foi suspensa pela plataforma, então um pagamento não a reativa sozinho', async () => {

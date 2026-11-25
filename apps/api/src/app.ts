@@ -13,6 +13,7 @@ import { activityRoutes } from './modules/activities.js';
 import { productRoutes } from './modules/products.js';
 import { proposalRoutes } from './modules/proposals.js';
 import { dashboardRoutes } from './modules/dashboard.js';
+import { marketingRoutes } from './modules/marketing.js';
 import { billingRoutes } from './modules/billing.js';
 import { webhookRoutes } from './modules/webhooks.js';
 import { platformRoutes } from './modules/platform.js';
@@ -81,6 +82,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
         await productRoutes(api, deps);
         await proposalRoutes(api, deps);
         await dashboardRoutes(api, deps);
+        await marketingRoutes(api, deps);
         await billingRoutes(api, deps);
       },
       { prefix: '/api' },

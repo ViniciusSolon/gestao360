@@ -140,7 +140,13 @@ const RANK: Record<Role, number> = { seller: 1, manager: 2, admin: 3, owner: 4 }
 export const can = (role: Role | undefined, min: Role) => !!role && RANK[role] >= RANK[min];
 
 export const ROLE_LABEL: Record<Role, string> = { owner: 'Proprietário', admin: 'Administrador', manager: 'Gerente', seller: 'Vendedor' };
-export const CHANNELS: Record<string, string> = {
-  site: 'Site', indicacao: 'Indicação', evento: 'Evento', whatsapp: 'WhatsApp', email: 'E-mail',
-  telefone: 'Telefone', redes_sociais: 'Redes sociais', outro: 'Outro',
-};
+/** Fontes de aquisição (mesma lista e ordem do servidor: apps/api/src/lib/sources.ts). */
+export const SOURCES: [string, string][] = [
+  ['google_ads', 'Google Ads'], ['meta_ads', 'Meta Business'], ['tiktok_ads', 'TikTok Ads'], ['linkedin_ads', 'LinkedIn Ads'],
+  ['google_organico', 'Google Orgânico'], ['whatsapp', 'WhatsApp'], ['instagram_organico', 'Instagram Orgânico'],
+  ['indicacao', 'Indicação'], ['direto', 'Direto'], ['chatgpt_ads', 'ChatGPT Ads'],
+  // legado (leads antigos)
+  ['site', 'Site'], ['evento', 'Evento'], ['email', 'E-mail'], ['telefone', 'Telefone'], ['redes_sociais', 'Redes sociais'], ['outro', 'Outro'],
+];
+export const LEGACY_SOURCES = new Set(['site', 'evento', 'email', 'telefone', 'redes_sociais']);
+export const CHANNELS: Record<string, string> = Object.fromEntries(SOURCES);

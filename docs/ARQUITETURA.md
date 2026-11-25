@@ -104,7 +104,7 @@ Como foi construído:
 1. **Identidade separada**: tabela `platform_admins`, login próprio, cookie `g360_admin_sid` com `path=/api/platform`. Cookie de cliente não funciona no painel e vice-versa.
 2. **Papel de banco separado**: `g360_platform` (com BYPASSRLS) usado só pelo painel, webhooks e worker.
 3. **RBAC interno**: `superadmin` (altera) e `support` (somente leitura), validado no servidor.
-4. **Ações com motivo obrigatório e auditoria**: suspender/reativar, trocar plano, estender trial.
+4. **Ações com motivo obrigatório e auditoria**: cadastrar cliente (gera o link do responsável), suspender/reativar, trocar plano.
 5. **LGPD**: o painel mostra metadados de uso (contagens, usuários, assinatura), **não** os leads/propostas dos clientes.
 6. **Métricas do negócio**: MRR, clientes por status, novos em 30 dias, uso total.
 7. **Deploy recomendado**: `API_SURFACE=platform` em host interno (VPN/Cloudflare Access/SSO com MFA).

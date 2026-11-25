@@ -11,14 +11,15 @@ como SaaS multi-empresa com assinatura e **painel interno para controlar os clie
 
 | Área | Funcionalidades |
 |---|---|
-| Conta | Cadastro da empresa (trial 14 dias), login, convites com papéis (owner/admin/gerente/vendedor), limite de usuários por plano |
+| Conta | Empresas cadastradas **pela plataforma** (sem cadastro público, sem período de teste); o responsável define a senha por um link de uso único; convites com papéis (owner/admin/gerente/vendedor); limite de usuários por plano |
 | CRM | Leads com pontuação/MQL calculados no servidor, funil Kanban com etapas personalizáveis (arrastar e soltar), histórico, motivo de perda |
 | Atividades | Agenda de tarefas/ligações/reuniões (link de videochamada https), conclusão, atrasadas |
 | Catálogo | Produtos com NCM, tributo estimado, foto (https), ativo/inativo |
 | Propostas | Itens do catálogo, desconto limitado por papel, frete, condições, numeração sequencial, envio/aceite/recusa, **PDF** |
-| Indicadores | Leads, MQLs, ganhos, valor vendido, ticket médio, conversão, ciclo de vendas, previsão, receita por vendedor e canal, oportunidades paradas — cada número mostra sua origem |
+| Indicadores → Marketing | Cost, Leads, Deals, Gains, CPL, CPD, CAC e ROI com variação e metas; gráficos por fonte; tabela por fonte/campanha; lançamento de investimento |
+| Indicadores → Comercial | Leads, MQLs, ganhos, valor vendido, ticket médio, conversão, ciclo de vendas, previsão, receita por vendedor e canal, oportunidades paradas — cada número mostra sua origem |
 | Assinatura | Planos Starter/Pro/Business, checkout (Stripe ou gateway fake em dev), webhook assinado e idempotente |
-| Plataforma (`/admin`) | MRR, clientes por status, busca, detalhe, suspender/reativar, trocar plano, estender trial, auditoria |
+| Plataforma (`/admin`) | Cadastrar cliente e gerar link de acesso, MRR, clientes por status, busca, detalhe, suspender/reativar, trocar plano, auditoria |
 
 Fora do MVP (roadmap do PDF): WhatsApp, e-mail marketing, VoIP, IA generativa, ERP (pedidos, estoque, financeiro, PCP, MRP, RH).
 

@@ -12,7 +12,11 @@ import { guard, idParam, params } from './common.js';
 const INVITE_TTL_MS = 7 * 24 * 3600 * 1000;
 const assignableRole = z.enum(['admin', 'manager', 'seller']);
 
-const inviteBody = z.object({ email: z.string().trim().toLowerCase().email().max(200), role: assignableRole });
+const inviteBody = z.object({
+  email: z.string().trim().toLowerCase().email().max(200),
+  role: assignableRole,
+  name: z.string().trim().max(120).optional().transform((v) => v || null),
+});
 const patchUser = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   role: assignableRole.optional(),
@@ -63,8 +67,8 @@ export async function userRoutes(app: FastifyInstance, deps: Deps) {
     const a = authOf(req);
     return db.withAuth(a, async (c) => {
       const r = await c.query(
-        `SELECT id, email, role, expires_at, created_at FROM invites
-          WHERE accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now() ORDER BY created_at DESC`,
+        `SELECT id, email, name, role, expires_at, created_at FROM invites
+          WHERE role <> 'owner' AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now() ORDER BY created_at DESC`,
       );
       return r.rows;
     });
@@ -85,9 +89,9 @@ export async function userRoutes(app: FastifyInstance, deps: Deps) {
       );
       // Índice único parcial impede dois convites pendentes para o mesmo e-mail
       const r = await c.query(
-        `INSERT INTO invites (tenant_id, email, role, token_hash, expires_at, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, email, role, expires_at`,
-        [a.tenantId, b.email, b.role, sha256(token), new Date(Date.now() + INVITE_TTL_MS), a.userId],
+        `INSERT INTO invites (tenant_id, email, name, role, token_hash, expires_at, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, email, name, role, expires_at`,
+        [a.tenantId, b.email, b.name, b.role, sha256(token), new Date(Date.now() + INVITE_TTL_MS), a.userId],
       );
       const inv = r.rows[0];
       await enqueue(c, {
@@ -107,7 +111,7 @@ export async function userRoutes(app: FastifyInstance, deps: Deps) {
     const a = authOf(req);
     const { id } = params(idParam, req);
     return db.withAuth(a, async (c) => {
-      const r = await c.query(`UPDATE invites SET revoked_at = now() WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL RETURNING id`, [id]);
+      const r = await c.query(`UPDATE invites SET revoked_at = now() WHERE id = $1 AND role <> 'owner' AND accepted_at IS NULL AND revoked_at IS NULL RETURNING id`, [id]);
       if (!r.rowCount) throw notFound('Convite não encontrado');
       await audit(c, { tenantId: a.tenantId, actorType: 'user', actorId: a.userId, action: 'invite.revoked', targetType: 'invite', targetId: id, ip: req.ip });
       return { ok: true };

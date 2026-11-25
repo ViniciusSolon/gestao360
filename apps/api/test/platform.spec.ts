@@ -41,13 +41,15 @@ describe('Painel da plataforma — autenticação e papéis', () => {
     expect(r.statusCode).toBe(401);
   });
 
-  it('quando o suporte (somente leitura) tenta suspender, trocar plano ou estender trial, então 403', async () => {
+  it('quando o suporte (somente leitura) tenta suspender, trocar plano, cadastrar cliente ou gerar link, então 403', async () => {
     const s = await signup(t.app);
     const sup = await admin('support');
     expect((await pcall(sup, 'GET', '/tenants')).statusCode).toBe(200);
     expect((await pcall(sup, 'POST', `/tenants/${s.tenantId}/status`, { status: 'suspended', reason: 'teste' })).statusCode).toBe(403);
     expect((await pcall(sup, 'POST', `/tenants/${s.tenantId}/plan`, { planCode: 'business', reason: 'teste' })).statusCode).toBe(403);
-    expect((await pcall(sup, 'POST', `/tenants/${s.tenantId}/trial`, { days: 30, reason: 'teste' })).statusCode).toBe(403);
+    expect((await pcall(sup, 'POST', '/tenants', { companyName: 'Nova', slug: 'nova-sup', ownerName: 'N', ownerEmail: 'n@n.com', planCode: 'pro' })).statusCode).toBe(403);
+    expect((await pcall(sup, 'POST', `/tenants/${s.tenantId}/owner-link`)).statusCode).toBe(403);
+    expect(Number((await t.db.platform.query(`SELECT count(*) FROM tenants WHERE slug = 'nova-sup'`)).rows[0].count)).toBe(0);
   });
 });
 
@@ -85,13 +87,64 @@ describe('Painel da plataforma — controle dos clientes', () => {
     expect(d.usage).toBeDefined();
   });
 
-  it('quando estende o trial, então a data avança; quando o cliente não está em trial, então 422', async () => {
-    const s = await signup(t.app);
+  it('quando o superadmin cadastra um cliente, então ele aparece pendente e o responsável define a senha pelo link', async () => {
     const sa = await admin('superadmin');
-    const r = await pcall(sa, 'POST', `/tenants/${s.tenantId}/trial`, { days: 10, reason: 'negociação' });
-    expect(r.statusCode).toBe(200);
-    await t.db.platform.query(`UPDATE tenants SET status = 'active' WHERE id = $1`, [s.tenantId]);
-    expect((await pcall(sa, 'POST', `/tenants/${s.tenantId}/trial`, { days: 10, reason: 'x x x' })).statusCode).toBe(422);
+    const r = await pcall(sa, 'POST', '/tenants', { companyName: 'Usaplast Indústria', slug: 'usaplast', ownerName: 'Vini', ownerEmail: 'vini@usaplast.com.br', planCode: 'pro' });
+    expect(r.statusCode).toBe(201);
+    const { tenantId, accessUrl } = r.json();
+    expect(accessUrl).toMatch(/\/convite\?token=/);
+    let row = (await pcall(sa, 'GET', '/tenants?q=usaplast')).json()[0];
+    expect(row).toMatchObject({ name: 'Usaplast Indústria', status: 'active', plan_code: 'pro', owner_email: 'vini@usaplast.com.br', owner_pending: true });
+    expect((await pcall(sa, 'GET', `/tenants/${tenantId}`)).json().pendingOwner).toMatchObject({ name: 'Vini', email: 'vini@usaplast.com.br' });
+
+    const token = new URL(accessUrl).searchParams.get('token');
+    expect((await t.app.inject({ method: 'POST', url: '/api/auth/accept-invite', headers: { origin: ORIGIN }, payload: { token, password: 'senha-forte-123' } })).statusCode).toBe(201);
+    row = (await pcall(sa, 'GET', '/tenants?q=usaplast')).json()[0];
+    expect(row.owner_pending).toBe(false);
+    expect((await pcall(sa, 'GET', `/tenants/${tenantId}`)).json().pendingOwner).toBeNull();
+    const audit = (await pcall(sa, 'GET', `/audit?tenantId=${tenantId}`)).json().map((a: any) => a.action);
+    expect(audit).toEqual(expect.arrayContaining(['platform.tenant_created', 'platform.owner_access_link']));
+  });
+
+  it('quando gera um novo link de acesso, então o anterior deixa de valer; depois da senha definida, não gera mais', async () => {
+    const sa = await admin('superadmin');
+    const { tenantId, accessUrl } = (await pcall(sa, 'POST', '/tenants', { companyName: 'Link Co', slug: 'link-co', ownerName: 'L', ownerEmail: 'l@link.com', planCode: 'starter' })).json();
+    const r2 = await pcall(sa, 'POST', `/tenants/${tenantId}/owner-link`);
+    expect(r2.statusCode).toBe(200);
+    const oldToken = new URL(accessUrl).searchParams.get('token');
+    const newToken = new URL(r2.json().accessUrl).searchParams.get('token');
+    expect((await t.app.inject({ method: 'GET', url: `/api/auth/invite?token=${oldToken}` })).statusCode).toBe(410);
+    expect((await t.app.inject({ method: 'POST', url: '/api/auth/accept-invite', headers: { origin: ORIGIN }, payload: { token: newToken, password: 'senha-forte-123' } })).statusCode).toBe(201);
+    const again = await pcall(sa, 'POST', `/tenants/${tenantId}/owner-link`);
+    expect([again.statusCode, again.json().message]).toEqual([409, 'Esta empresa já tem responsável com senha definida']);
+  });
+
+  it('quando o identificador ou o e-mail já estão em uso, então 409 com mensagem clara e nada é criado', async () => {
+    const sa = await admin('superadmin');
+    await pcall(sa, 'POST', '/tenants', { companyName: 'Empresa A', slug: 'mesmo-slug', ownerName: 'A', ownerEmail: 'a@a.com', planCode: 'starter' });
+    const dupSlug = await pcall(sa, 'POST', '/tenants', { companyName: 'Empresa B', slug: 'mesmo-slug', ownerName: 'B', ownerEmail: 'b@b.com', planCode: 'starter' });
+    expect([dupSlug.statusCode, dupSlug.json().message]).toEqual([409, 'Identificador já está em uso por outro cliente']);
+    const dupEmail = await pcall(sa, 'POST', '/tenants', { companyName: 'Empresa C', slug: 'outro-slug', ownerName: 'C', ownerEmail: 'A@a.com', planCode: 'starter' });
+    expect(dupEmail.statusCode).toBe(409);
+    expect(Number((await t.db.platform.query('SELECT count(*) FROM tenants')).rows[0].count)).toBe(1);
+  });
+
+  it('quando os dados do cliente são inválidos ou o plano não existe, então 400/422', async () => {
+    const sa = await admin('superadmin');
+    expect((await pcall(sa, 'POST', '/tenants', { companyName: 'X', slug: 'Com Espaço', ownerName: 'X', ownerEmail: 'nao-email', planCode: 'starter' })).statusCode).toBe(400);
+    expect((await pcall(sa, 'POST', '/tenants', { companyName: 'Xy', slug: 'xy-co', ownerName: 'X', ownerEmail: 'x@x.com', planCode: 'plano-falso' })).statusCode).toBe(422);
+  });
+
+  it('quando um admin da empresa tenta listar ou revogar um link de responsável pela API de convites, então não vê nem encontra', async () => {
+    const owner = await signup(t.app);
+    const pend = await t.db.platform.query(
+      `INSERT INTO invites (tenant_id, email, role, token_hash, expires_at) VALUES ($1, 'x@x.com', 'owner', 'hash-qualquer', now() + interval '1 day') RETURNING id`,
+      [owner.tenantId],
+    );
+    expect((await call(t.app, owner, 'GET', '/api/invites')).json().some((i: any) => i.role === 'owner')).toBe(false);
+    expect((await call(t.app, owner, 'DELETE', `/api/invites/${pend.rows[0].id}`)).statusCode).toBe(404);
+    const still = await t.db.platform.query('SELECT revoked_at FROM invites WHERE id = $1', [pend.rows[0].id]);
+    expect(still.rows[0].revoked_at).toBeNull();
   });
 
   it('quando a plataforma troca o plano, então o limite novo vale imediatamente', async () => {

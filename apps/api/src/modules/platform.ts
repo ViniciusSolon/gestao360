@@ -9,10 +9,11 @@ import {
   setSessionCookie,
 } from '../auth/guards.js';
 import { newToken, sha256, verifyPassword } from '../lib/crypto.js';
-import { forbidden, notFound, unauthorized, unprocessable } from '../lib/errors.js';
+import { conflict, forbidden, notFound, unauthorized, unprocessable } from '../lib/errors.js';
 import { throttle } from '../lib/throttle.js';
 import { decryptSecret, normalizeRecoveryCode, verifyTotp } from '../lib/totp.js';
 import { audit } from '../lib/limits.js';
+import { assertTenantExists, issueOwnerAccessLink, provisionTenant } from '../lib/tenants.js';
 import { idParam, params } from './common.js';
 
 /**
@@ -33,7 +34,13 @@ const mfaBody = z
   .refine((b) => !!b.code !== !!b.recoveryCode, 'Informe o código do autenticador OU um código de recuperação');
 const statusBody = z.object({ status: z.enum(['active', 'suspended', 'canceled']), reason: z.string().trim().min(3).max(500) });
 const planBody = z.object({ planCode: z.string().min(1).max(40), reason: z.string().trim().min(3).max(500) });
-const trialBody = z.object({ days: z.number().int().min(1).max(60), reason: z.string().trim().min(3).max(500) });
+const newTenantBody = z.object({
+  companyName: z.string().trim().min(2).max(120),
+  slug: z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9-]{1,62}$/, 'Use letras minúsculas, números e hífen'),
+  ownerName: z.string().trim().min(1).max(120),
+  ownerEmail: z.string().trim().toLowerCase().email().max(200),
+  planCode: z.string().min(1).max(40),
+});
 const listQuery = z.object({
   q: z.string().trim().max(100).optional(),
   status: z.enum(['trialing', 'active', 'past_due', 'suspended', 'canceled']).optional(),
@@ -174,7 +181,11 @@ export async function platformRoutes(app: FastifyInstance, deps: Deps) {
     const r = await db.platform.query(
       `SELECT t.id, t.name, t.slug, t.status, t.seats_used, t.leads_count, t.trial_ends_at, t.created_at,
               p.code AS plan_code, p.name AS plan_name, p.max_users, p.price_cents,
-              (SELECT email FROM users u WHERE u.tenant_id = t.id AND u.role = 'owner') AS owner_email,
+              coalesce(
+                (SELECT email FROM users u WHERE u.tenant_id = t.id AND u.role = 'owner'),
+                (SELECT email FROM invites i WHERE i.tenant_id = t.id AND i.role = 'owner' AND i.accepted_at IS NULL
+                    AND i.revoked_at IS NULL ORDER BY i.created_at DESC LIMIT 1)) AS owner_email,
+              NOT EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = t.id AND u.role = 'owner') AS owner_pending,
               (SELECT max(s.created_at) FROM sessions s WHERE s.tenant_id = t.id) AS last_login_at
          FROM tenants t JOIN plans p ON p.id = t.plan_id
         WHERE ($1::text IS NULL OR t.name ILIKE '%' || $1 || '%' OR t.slug ILIKE '%' || $1 || '%')
@@ -195,7 +206,7 @@ export async function platformRoutes(app: FastifyInstance, deps: Deps) {
       )
     ).rows[0];
     if (!t) throw notFound('Cliente não encontrado');
-    const [users, sub, auditRows, usage] = await Promise.all([
+    const [users, sub, auditRows, usage, pendingOwner] = await Promise.all([
       db.platform.query('SELECT id, name, email, role, active, created_at FROM users WHERE tenant_id = $1 ORDER BY role, name', [id]),
       db.platform.query('SELECT provider_subscription_id, status, current_period_end, updated_at FROM subscriptions WHERE tenant_id = $1', [id]),
       db.platform.query('SELECT actor_type, action, target_type, metadata, created_at FROM audit_log WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 50', [id]),
@@ -205,12 +216,20 @@ export async function platformRoutes(app: FastifyInstance, deps: Deps) {
                 (SELECT count(*) FROM leads WHERE tenant_id = $1 AND status = 'won') AS won`,
         [id],
       ),
+      db.platform.query(
+        `SELECT name, email, expires_at, created_at FROM invites
+          WHERE tenant_id = $1 AND role = 'owner' AND accepted_at IS NULL AND revoked_at IS NULL
+          ORDER BY created_at DESC LIMIT 1`,
+        [id],
+      ),
     ]);
     // Dados de negócio do cliente (leads, valores) NÃO são expostos aqui: só metadados de uso (LGPD)
     return {
       tenant: t,
       users: users.rows,
       subscription: sub.rows[0] ?? null,
+      // Responsável que ainda não definiu a senha (link pendente)
+      pendingOwner: users.rows.some((u) => u.role === 'owner') ? null : (pendingOwner.rows[0] ?? null),
       audit: auditRows.rows,
       usage: Object.fromEntries(Object.entries(usage.rows[0]).map(([k, v]) => [k, Number(v)])),
     };
@@ -244,18 +263,44 @@ export async function platformRoutes(app: FastifyInstance, deps: Deps) {
     });
   });
 
-  app.post('/tenants/:id/trial', preWrite, async (req) => {
+  /**
+   * Cadastra uma empresa cliente (só a plataforma faz isso; não há cadastro público).
+   * Devolve o link para o responsável definir a senha — também enviado por e-mail.
+   */
+  app.post('/tenants', preWrite, async (req, reply) => {
+    const b = newTenantBody.parse(req.body);
+    try {
+      const r = await db.withPlatform((c) => provisionTenant(c, b, config.APP_PUBLIC_URL, req.platformAuth!.adminId));
+      return reply.status(201).send({ tenantId: r.tenantId, accessUrl: r.url });
+    } catch (e) {
+      // Mensagens claras para os conflitos garantidos pelo banco (o painel é interno)
+      const pg = e as { code?: string; constraint?: string };
+      if (pg.code === '23505' && pg.constraint === 'tenants_slug_key') throw conflict('Identificador já está em uso por outro cliente', 'slug_in_use');
+      if (pg.code === '23505' && pg.constraint === 'invites_pending_owner_email_uq') {
+        throw conflict('Este e-mail já é responsável de outro cliente aguardando definir a senha', 'email_in_use');
+      }
+      throw e;
+    }
+  });
+
+  /** Gera um novo link de acesso para o responsável (o anterior deixa de valer). */
+  app.post('/tenants/:id/owner-link', preWrite, async (req) => {
     const { id } = params(idParam, req);
-    const b = trialBody.parse(req.body);
     return db.withPlatform(async (c) => {
-      const r = await c.query(
-        `UPDATE tenants SET trial_ends_at = greatest(trial_ends_at, now()) + make_interval(days => $2)
-          WHERE id = $1 AND status = 'trialing' RETURNING trial_ends_at`,
-        [id, b.days],
-      );
-      if (!r.rowCount) throw unprocessable('Cliente não está em período de teste');
-      await audit(c, { tenantId: id, actorType: 'platform_admin', actorId: req.platformAuth!.adminId, action: 'platform.tenant_trial_extended', metadata: b, ip: req.ip });
-      return r.rows[0];
+      await assertTenantExists(c, id);
+      const owner = await c.query(`SELECT 1 FROM users WHERE tenant_id = $1 AND role = 'owner'`, [id]);
+      if (owner.rowCount) throw conflict('Esta empresa já tem responsável com senha definida', 'owner_exists');
+      // O link mais recente (mesmo vencido) diz para quem gerar o novo
+      const pending = (
+        await c.query(
+          `SELECT name, email FROM invites WHERE tenant_id = $1 AND role = 'owner' AND accepted_at IS NULL
+            ORDER BY created_at DESC LIMIT 1`,
+          [id],
+        )
+      ).rows[0];
+      if (!pending) throw unprocessable('Não há responsável aguardando definir senha', 'no_pending_owner');
+      const r = await issueOwnerAccessLink(c, id, { name: pending.name, email: pending.email }, config.APP_PUBLIC_URL, req.platformAuth!.adminId);
+      return { accessUrl: r.url };
     });
   });
 

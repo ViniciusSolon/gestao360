@@ -2,6 +2,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { createTestApp, ORIGIN, resetDb, signedWebhook, signup, type TestCtx } from './helpers.js';
 import { loadConfig } from '../src/config.js';
+import { drainJobs } from '../src/jobs/runner.js';
 
 const tryLogin = (t: TestCtx, xff?: string, remoteAddress = '127.0.0.1') =>
   t.app.inject({
@@ -84,8 +85,19 @@ describe('SEC-04/SEC-05 — simulador de pagamento não pode liberar plano fora 
       headers: { origin: ORIGIN, cookie: s.cookie, 'idempotency-key': 'sec04-chave-0001' }, payload: { planCode: 'pro' },
     });
     const sim = await t.app.inject({ method: 'POST', url: `/api/webhooks/dev/fake-checkout/${ck.json().sessionId}/complete`, headers: { origin: ORIGIN } });
-    const st = await t.db.platform.query('SELECT status FROM tenants WHERE id = $1', [s.tenantId]);
-    return { simStatus: sim.statusCode, tenantStatus: st.rows[0].status };
+    // Sem teste grátis a conta já nasce ativa: a prova de "não pagou" é não ter assinatura nem trocar de plano
+    const st = await t.db.platform.query(
+      `SELECT p.code AS plan, (SELECT count(*) FROM subscriptions WHERE tenant_id = t.id) AS subs
+         FROM tenants t JOIN plans p ON p.id = t.plan_id WHERE t.id = $1`,
+      [s.tenantId],
+    );
+    await drainJobs(t.deps);
+    const after = await t.db.platform.query(
+      `SELECT p.code AS plan, (SELECT count(*) FROM subscriptions WHERE tenant_id = t.id) AS subs
+         FROM tenants t JOIN plans p ON p.id = t.plan_id WHERE t.id = $1`,
+      [s.tenantId],
+    );
+    return { simStatus: sim.statusCode, before: st.rows[0], after: after.rows[0] };
   }
 
   it('quando NODE_ENV=development e gateway fake SEM a flag, então a rota não existe (404) e a conta não é ativada', async () => {
@@ -94,7 +106,7 @@ describe('SEC-04/SEC-05 — simulador de pagamento não pode liberar plano fora 
       await resetDb(t.db);
       const r = await pagarSemGateway(t);
       expect(r.simStatus).toBe(404);
-      expect(r.tenantStatus).toBe('trialing');
+      expect(r.after).toEqual({ plan: 'starter', subs: '0' }); // não virou Pro e não ganhou assinatura
     } finally { await t.app.close(); await t.db.close(); }
   });
 

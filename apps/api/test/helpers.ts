@@ -8,6 +8,7 @@ import { Db } from '../src/db/db.js';
 import { FakeGateway, signPayload } from '../src/billing/gateway.js';
 import type { EmailMessage, EmailSender } from '../src/email/email.js';
 import type { Deps } from '../src/deps.js';
+import { provisionTenant } from '../src/lib/tenants.js';
 
 export const WEBHOOK_SECRET = 'whsec_test_' + 'x'.repeat(32);
 export const ORIGIN = 'http://localhost:5173';
@@ -20,6 +21,9 @@ export class RecordingEmail implements EmailSender {
     this.sent.push(m);
   }
 }
+
+/** Permite ao helper signup() achar o banco a partir do app. */
+const ctxByApp = new WeakMap<FastifyInstance, TestCtx>();
 
 export interface TestCtx {
   app: FastifyInstance;
@@ -48,7 +52,9 @@ export async function createTestApp(env: Record<string, string | undefined> = {}
   const email = new RecordingEmail();
   const deps: Deps = { config, db, gateway, email };
   const app = await buildApp(deps);
-  return { app, deps, gateway, email, db };
+  const ctx = { app, deps, gateway, email, db };
+  ctxByApp.set(app, ctx);
+  return ctx;
 }
 
 /** Limpa os dados entre testes (mantém planos e migrations). */
@@ -78,24 +84,35 @@ export interface Session {
 }
 
 let seq = 0;
-export async function signup(app: FastifyInstance, overrides: Partial<{ companyName: string; slug: string; email: string; name: string }> = {}): Promise<Session> {
+/**
+ * Cria uma empresa cliente como no fluxo real: a PLATAFORMA cadastra (provisionTenant)
+ * e o responsável define a senha pelo link de acesso (POST /api/auth/accept-invite).
+ * Devolve a sessão do responsável (owner).
+ */
+export async function signup(app: FastifyInstance, overrides: Partial<{ companyName: string; slug: string; email: string; name: string; planCode: string }> = {}): Promise<Session> {
   seq++;
   const id = `${Date.now().toString(36)}${seq}`;
-  const res = await app.inject({
-    method: 'POST',
-    url: '/api/auth/signup',
-    headers: { origin: ORIGIN },
-    payload: {
-      companyName: overrides.companyName ?? `Empresa ${id}`,
-      slug: overrides.slug ?? `empresa-${id}`,
-      name: overrides.name ?? 'Dona',
-      email: overrides.email ?? `owner-${id}@exemplo.com`,
-      password: 'senha-forte-123',
-    },
-  });
-  if (res.statusCode !== 201) throw new Error(`signup falhou: ${res.statusCode} ${res.body}`);
-  const body = res.json();
-  return { cookie: cookieOf(res), tenantId: body.tenantId, userId: body.userId };
+  const ctx = ctxByApp.get(app);
+  if (!ctx) throw new Error('app de teste desconhecido');
+  const created = await ctx.db.withPlatform((c) =>
+    provisionTenant(
+      c,
+      {
+        companyName: overrides.companyName ?? `Empresa ${id}`,
+        slug: overrides.slug ?? `empresa-${id}`,
+        ownerName: overrides.name ?? 'Dona',
+        ownerEmail: overrides.email ?? `owner-${id}@exemplo.com`,
+        planCode: overrides.planCode ?? 'starter',
+      },
+      ctx.deps.config.APP_PUBLIC_URL,
+      null,
+    ),
+  );
+  const token = new URL(created.url).searchParams.get('token')!;
+  const res = await app.inject({ method: 'POST', url: '/api/auth/accept-invite', headers: { origin: ORIGIN }, payload: { token, password: 'senha-forte-123' } });
+  if (res.statusCode !== 201) throw new Error(`definir senha falhou: ${res.statusCode} ${res.body}`);
+  const me = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { cookie: cookieOf(res) } });
+  return { cookie: cookieOf(res), tenantId: created.tenantId, userId: me.json().user.id };
 }
 
 /** Requisição autenticada como usuário do tenant. */

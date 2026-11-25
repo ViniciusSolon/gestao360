@@ -6,12 +6,15 @@ import { conflict, notFound } from '../lib/errors.js';
 import { audit } from '../lib/limits.js';
 import { guard, idParam, params } from './common.js';
 
-const stageBody = z.object({
+/** Campos da etapa SEM padrão (base da edição parcial). */
+const stageFields = z.object({
   name: z.string().trim().min(1).max(60),
   probability: z.number().int().min(0).max(100),
-  kind: z.enum(['open', 'won', 'lost']).default('open'),
+  kind: z.enum(['open', 'won', 'lost']),
 });
-const patchStage = stageBody.partial().extend({ position: z.number().int().min(0).max(1000).optional() });
+const stageBody = stageFields.extend({ kind: z.enum(['open', 'won', 'lost']).default('open') });
+/** Edição: sem padrão, senão renomear a etapa "Ganho" a transformava em etapa aberta. */
+const patchStage = stageFields.partial().extend({ position: z.number().int().min(0).max(1000).optional() });
 
 export async function pipelineRoutes(app: FastifyInstance, deps: Deps) {
   const { db } = deps;

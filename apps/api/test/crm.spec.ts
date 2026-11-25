@@ -218,18 +218,42 @@ describe('Propostas', () => {
 });
 
 describe('Conta bloqueada', () => {
-  it('quando o trial venceu, então as rotas de negócio respondem 402 mas a cobrança continua acessível', async () => {
+  it('quando a conta é criada, então não existe prazo de teste: segue utilizável mesmo com a data antiga de trial no passado', async () => {
     const s = await signup(t.app);
-    await t.db.platform.query(`UPDATE tenants SET trial_ends_at = now() - interval '1 day' WHERE id = $1`, [s.tenantId]);
-    expect((await call(t.app, s, 'GET', '/api/leads')).statusCode).toBe(402);
-    expect((await call(t.app, s, 'GET', '/api/billing')).statusCode).toBe(200);
+    await t.db.platform.query(`UPDATE tenants SET trial_ends_at = now() - interval '30 days' WHERE id = $1`, [s.tenantId]);
+    expect((await call(t.app, s, 'GET', '/api/leads')).statusCode).toBe(200);
     const me = (await call(t.app, s, 'GET', '/api/auth/me')).json();
-    expect(me.tenant.usable).toBe(false);
+    expect(me.tenant).toMatchObject({ status: 'active', usable: true });
   });
 
   it('quando a conta está suspensa, então 402 em tudo que é de negócio', async () => {
     const s = await signup(t.app);
     await t.db.platform.query(`UPDATE tenants SET status = 'suspended' WHERE id = $1`, [s.tenantId]);
     expect((await call(t.app, s, 'POST', '/api/leads', { name: 'x' })).statusCode).toBe(402);
+  });
+});
+
+describe('Edição parcial não apaga o que não foi enviado', () => {
+  it('quando edita só o nome do lead, então canal, valor e campanha continuam iguais', async () => {
+    const s = await signup(t.app);
+    const lead = await createLead(t.app, s, { channel: 'meta_ads', valueCents: 4800000, campaign: 'Natal' });
+    const r = (await call(t.app, s, 'PATCH', `/api/leads/${lead.id}`, { name: 'Novo nome' })).json();
+    expect(r).toMatchObject({ name: 'Novo nome', channel: 'meta_ads', value_cents: '4800000', campaign: 'Natal' });
+  });
+
+  it('quando ativa/desativa um produto, então preço e tributo continuam; editar o nome não reativa produto inativo', async () => {
+    const s = await signup(t.app);
+    const p = await createProduct(t.app, s, { priceCents: 12500, taxRateBp: 1800 });
+    const off = (await call(t.app, s, 'PATCH', `/api/products/${p.id}`, { active: false })).json();
+    expect(off).toMatchObject({ active: false, price_cents: '12500', tax_rate_bp: 1800 });
+    const renamed = (await call(t.app, s, 'PATCH', `/api/products/${p.id}`, { name: 'Outro nome' })).json();
+    expect(renamed).toMatchObject({ name: 'Outro nome', active: false, tax_rate_bp: 1800 });
+  });
+
+  it('quando renomeia a etapa "Ganho", então ela continua sendo de ganho', async () => {
+    const s = await signup(t.app);
+    const won = (await stages(t.app, s)).find((x) => x.kind === 'won')!;
+    const r = (await call(t.app, s, 'PATCH', `/api/stages/${won.id}`, { name: 'Fechado' })).json();
+    expect(r).toMatchObject({ name: 'Fechado', kind: 'won' });
   });
 });

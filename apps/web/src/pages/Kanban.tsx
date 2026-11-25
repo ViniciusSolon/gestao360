@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { api, brl, can, CHANNELS, formatCnpj, maskCnpj, toCents, useApi, useSubmit } from '../lib/api';
+import { api, brl, can, formatCnpj, LEGACY_SOURCES, SOURCES, maskCnpj, toCents, useApi, useSubmit } from '../lib/api';
 import { useSession } from '../lib/session';
 
 interface Stage { id: string; name: string; kind: string; probability: number }
@@ -90,14 +90,14 @@ export function Kanban() {
 }
 
 function NewLead({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [f, setF] = useState({ name: '', company: '', cnpj: '', email: '', phone: '', channel: 'site', value: '', expectedCloseDate: '' });
+  const [f, setF] = useState({ name: '', company: '', cnpj: '', email: '', phone: '', channel: 'google_ads', campaign: '', value: '', expectedCloseDate: '' });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const submit = useSubmit(async (e: FormEvent) => {
     e.preventDefault();
     await api('/leads', {
       method: 'POST',
       body: {
-        name: f.name, company: f.company || null, cnpj: f.cnpj || null, email: f.email || null, phone: f.phone || null, channel: f.channel,
+        name: f.name, company: f.company || null, cnpj: f.cnpj || null, email: f.email || null, phone: f.phone || null, channel: f.channel, campaign: f.campaign || null,
         valueCents: f.value ? toCents(f.value) : 0, expectedCloseDate: f.expectedCloseDate || null,
       },
     });
@@ -113,7 +113,15 @@ function NewLead({ onClose, onCreated }: { onClose: () => void; onCreated: () =>
           <label>CNPJ<input value={f.cnpj} onChange={(e) => setF({ ...f, cnpj: maskCnpj(e.target.value) })} placeholder="00.000.000/0000-00" autoComplete="off" /></label>
           <label>E-mail<input type="email" value={f.email} onChange={set('email')} /></label>
           <label>Telefone<input value={f.phone} onChange={set('phone')} /></label>
-          <label>Canal<select value={f.channel} onChange={set('channel')}>{Object.entries(CHANNELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+          <label>Fonte
+            <select value={f.channel} onChange={set('channel')}>
+              {SOURCES.filter(([k]) => !LEGACY_SOURCES.has(k)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              <optgroup label="Outras">
+                {SOURCES.filter(([k]) => LEGACY_SOURCES.has(k)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </optgroup>
+            </select>
+          </label>
+          <label>Campanha<input value={f.campaign} onChange={set('campaign')} placeholder="Ex.: Black Friday" /></label>
           <label>Valor estimado (R$)<input inputMode="decimal" value={f.value} onChange={set('value')} placeholder="0,00" /></label>
           <label>Previsão de fechamento<input type="date" value={f.expectedCloseDate} onChange={set('expectedCloseDate')} /></label>
         </div>

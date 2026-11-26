@@ -217,7 +217,7 @@ label.chk input { width: auto; margin: 0; }
 .cp-channel h2 { margin: 0; font-size: 1.05rem; }
 .cp-dl { margin: 0; display: grid; gap: .4rem; font-size: .88rem; }
 .cp-dl div { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px dashed var(--border); padding-bottom: .3rem; }
-.cp-dl dt { color: var(--muted); } .cp-dl dd { margin: 0; text-align: right; word-break: break-all; }
+.cp-dl dt { color: var(--muted); flex-shrink: 0; } .cp-dl dd { margin: 0; text-align: right; min-width: 0; overflow-wrap: anywhere; }
 .cp-test { display: grid; grid-template-columns: 1fr auto; gap: .5rem; align-items: end; border-top: 1px solid var(--border); padding-top: .9rem; }
 .cp-test p { grid-column: 1 / -1; margin: 0; font-size: .85rem; }
 @media (max-width: 760px) { .cp-hero { flex-direction: column; align-items: flex-start; } .cp-cols { grid-template-columns: 1fr; } }

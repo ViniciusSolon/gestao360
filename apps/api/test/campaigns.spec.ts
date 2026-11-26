@@ -4,6 +4,7 @@ import { drainJobs } from '../src/jobs/runner.js';
 import { dispatchCampaign } from '../src/messaging/dispatch.js';
 import { smsSegments } from '../src/messaging/render.js';
 import { normalizeBrPhone } from '../src/lib/phone.js';
+import { loadConfig } from '../src/config.js';
 
 let t: TestCtx;
 beforeAll(async () => { t = await createTestApp(); });
@@ -75,6 +76,21 @@ describe('Canais (contas de cada empresa)', () => {
       const s = await signup(a.app);
       expect((await call(a.app, s, 'PUT', '/api/channels/sms', { from: 'X', apiToken: 'token-qualquer-123' })).statusCode).toBe(503);
     } finally { await a.app.close(); await a.db.close(); }
+  });
+});
+
+describe('Configuração do servidor', () => {
+  const base = { NODE_ENV: 'production', API_SURFACE: 'tenant', DATABASE_APP_URL: 'postgres://a@h/d', BILLING_PROVIDER: 'stripe', STRIPE_SECRET_KEY: 'sk_test_x', BILLING_WEBHOOK_SECRET: 'whsec_' + 'k'.repeat(30) };
+  it('quando o docker compose passa CHANNEL_SECRETS_KEY vazia, então a API sobe com campanhas desligadas (deploy não quebra)', () => {
+    expect(loadConfig({ ...base, CHANNEL_SECRETS_KEY: '' }).CHANNEL_SECRETS_KEY).toBeUndefined();
+    expect(loadConfig({ ...base, CHANNEL_SECRETS_KEY: '  ' }).CHANNEL_SECRETS_KEY).toBeUndefined();
+  });
+  it('quando CHANNEL_SECRETS_KEY está preenchida errada, então a API NÃO sobe', () => {
+    expect(() => loadConfig({ ...base, CHANNEL_SECRETS_KEY: 'curta' })).toThrow(/CHANNEL_SECRETS_KEY/);
+    expect(loadConfig({ ...base, CHANNEL_SECRETS_KEY: CHANNEL_KEY }).CHANNEL_SECRETS_KEY).toBe(CHANNEL_KEY);
+  });
+  it('quando MESSAGING_MODE=fake em produção, então a API NÃO sobe', () => {
+    expect(() => loadConfig({ ...base, MESSAGING_MODE: 'fake' })).toThrow(/MESSAGING_MODE/);
   });
 });
 

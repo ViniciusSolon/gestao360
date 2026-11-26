@@ -48,10 +48,12 @@ const schema = z
     /** Tentativas por e-mail a cada 15 min (login/cadastro), somadas ao limite por IP */
     AUTH_EMAIL_LIMIT_PER_15MIN: z.coerce.number().int().min(1).default(20),
     /** Chave AES-256 (64 hex) que cifra os tokens de Resend/Meta/Zenvia de cada empresa e assina links de descadastro. */
-    CHANNEL_SECRETS_KEY: z
-      .string()
-      .regex(/^[0-9a-fA-F]{64}$/, 'CHANNEL_SECRETS_KEY precisa ter 64 caracteres hexadecimais (openssl rand -hex 32)')
-      .optional(),
+    // Vazia = não configurada (o docker compose passa "" quando a variável não está no .env).
+    // Preenchida errada continua impedindo a API de subir.
+    CHANNEL_SECRETS_KEY: z.preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z.string().regex(/^[0-9a-fA-F]{64}$/, 'CHANNEL_SECRETS_KEY precisa ter 64 caracteres hexadecimais (openssl rand -hex 32)').optional(),
+    ),
     /** live = envia de verdade; fake = só registra (permitido apenas em development/test). */
     MESSAGING_MODE: z.enum(['live', 'fake']).default('live'),
     /** Versão da Graph API da Meta para o WhatsApp (confira a vigente em developers.facebook.com). */

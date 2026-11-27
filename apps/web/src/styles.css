@@ -330,3 +330,4 @@ button.thumb:hover { border-color: var(--primary); color: var(--primary); }
 a.secondary-link { display: inline-block; padding: .5rem .9rem; border-radius: 8px; border: 1px solid var(--border); color: var(--text); background: transparent; }
 @media (max-width: 760px) { .uf-personal { grid-template-columns: 1fr; } .uf-avatar { order: -1; } .btn-new { margin-left: 0; } }
 .prod-search { margin-bottom: .75rem; } .prod-search input { max-width: 360px; }
+button.sm, a.btn { white-space: nowrap; }

@@ -125,8 +125,8 @@ export function Users() {
               {(Object.keys(STATUS_LABEL) as Status[]).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
             </select>
             <div className="seg icons" role="group" aria-label="Visualização">
-              <button type="button" aria-pressed={view === 'list'} className={view === 'list' ? 'on' : ''} onClick={() => setViewSaved('list')} title="Lista">☰</button>
-              <button type="button" aria-pressed={view === 'grid'} className={view === 'grid' ? 'on' : ''} onClick={() => setViewSaved('grid')} title="Cartões">▦</button>
+              <button type="button" aria-pressed={view === 'list'} className={view === 'list' ? 'on' : ''} onClick={() => setViewSaved('list')} title="Lista" aria-label="Lista">☰</button>
+              <button type="button" aria-pressed={view === 'grid'} className={view === 'grid' ? 'on' : ''} onClick={() => setViewSaved('grid')} title="Cartões" aria-label="Cartões">▦</button>
             </div>
             <Link className="btn btn-new" to="/app/organizacao/usuarios/novo">+ Novo</Link>
           </div>

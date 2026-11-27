@@ -1,11 +1,16 @@
 import type { FastifyInstance } from 'fastify';
+import { randomBytes } from 'node:crypto';
 import PDFDocument from 'pdfkit';
 import { z } from 'zod';
 import type { Deps } from '../deps.js';
 import type { Client } from '../db/db.js';
 import { authOf, type TenantAuth } from '../auth/guards.js';
 import { atLeast } from '../auth/roles.js';
-import { conflict, notFound, unprocessable } from '../lib/errors.js';
+import { badRequest, conflict, notFound, unprocessable } from '../lib/errors.js';
+import { normalizeBrPhone } from '../lib/phone.js';
+import { throttle } from '../lib/throttle.js';
+import { ProviderError } from '../messaging/providers.js';
+import { loadChannelCreds, requireChannelKey } from './channels.js';
 import { idempotentTx } from '../lib/idempotency.js';
 import { audit, nextCounter } from '../lib/limits.js';
 import { assertDiscountAllowed, priceItem, sumTotals, type PricedItem } from '../lib/pricing.js';
@@ -44,7 +49,7 @@ async function loadVisibleProposal(c: Client, a: TenantAuth, id: string, forUpda
 const brl = (cents: number | string) =>
   (Number(cents) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-function renderPdf(data: { tenantName: string; proposal: any; lead: any; items: any[] }): Promise<Buffer> {
+export function renderPdf(data: { tenantName: string; proposal: any; lead: any; items: any[] }): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
     const chunks: Buffer[] = [];
@@ -189,7 +194,15 @@ export async function proposalRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/proposals/:id/reject', { preHandler: guard(deps) }, (req) => transition(req, 'sent', 'rejected'));
   app.post('/proposals/:id/accept', { preHandler: guard(deps) }, (req) =>
     transition(req, 'sent', 'accepted', async (c, p, a) => {
-      const won = (await c.query(`SELECT id FROM pipeline_stages WHERE kind = 'won' ORDER BY position LIMIT 1`)).rows[0];
+      // Etapa "ganho" do MESMO funil em que o lead está
+      const won = (
+        await c.query(
+          `SELECT w.id FROM leads l JOIN pipeline_stages cur ON cur.id = l.stage_id
+             JOIN pipeline_stages w ON w.pipeline_id = cur.pipeline_id AND w.kind = 'won'
+            WHERE l.id = $1 ORDER BY w.position LIMIT 1`,
+          [p.lead_id],
+        )
+      ).rows[0];
       await c.query(
         `UPDATE leads SET status = 'won', stage_id = coalesce($2, stage_id), value_cents = $3, closed_at = now(), updated_at = now()
           WHERE id = $1`,
@@ -214,6 +227,143 @@ export async function proposalRoutes(app: FastifyInstance, deps: Deps) {
     return reply
       .header('Content-Type', 'application/pdf')
       .header('Content-Disposition', `inline; filename="proposta-${data.proposal.number}.pdf"`)
+      .send(pdf);
+  });
+
+  /**
+   * Link da proposta para o cliente (sem login). Reaproveita o link atual se ainda valer
+   * por mais de 7 dias; senão gera outro (30 dias). Rascunho passa a "enviada".
+   * Tudo num UPDATE só (atômico, sem corrida entre dois cliques).
+   */
+  async function shareLink(c: Client, a: TenantAuth, id: string, ip: string, via: 'whatsapp' | 'email', markSent = true) {
+    await loadVisibleProposal(c, a, id);
+    const r = await c.query(
+      `UPDATE proposals SET
+          share_token      = CASE WHEN share_token IS NOT NULL AND share_expires_at > now() + interval '7 days' THEN share_token ELSE $2 END,
+          share_expires_at = CASE WHEN share_token IS NOT NULL AND share_expires_at > now() + interval '7 days' THEN share_expires_at ELSE now() + interval '30 days' END,
+          status  = CASE WHEN status = 'draft' AND $3 THEN 'sent' ELSE status END,
+          sent_at = CASE WHEN status = 'draft' AND $3 THEN now() ELSE sent_at END
+        WHERE id = $1 AND status IN ('draft', 'sent', 'accepted')
+        RETURNING id, number, status, sent_at, total_cents, lead_id, share_token, share_expires_at`,
+      [id, randomBytes(32).toString('base64url'), markSent],
+    );
+    if (!r.rowCount) throw conflict('Proposta recusada não pode ser enviada', 'invalid_status');
+    await audit(c, { tenantId: a.tenantId, actorType: 'user', actorId: a.userId, action: 'proposal.shared', targetType: 'proposal', targetId: id, metadata: { via }, ip });
+    const p = r.rows[0];
+    return { ...p, url: `${deps.config.APP_PUBLIC_URL}/api/public/propostas/${p.share_token}` };
+  }
+
+  const messageFor = (p: { number: number; total_cents: string | number }, lead: { name: string }, tenantName: string, url: string) =>
+    `Olá, ${String(lead.name).split(/\s+/)[0]}! Segue a proposta comercial nº ${p.number} da ${tenantName}, no valor de ${brl(p.total_cents)}.\n\nVeja aqui: ${url}`;
+
+  /** WhatsApp: devolve o link do wa.me com a mensagem pronta (abre no WhatsApp do vendedor). */
+  app.post('/proposals/:id/share/whatsapp', { preHandler: guard(deps) }, async (req) => {
+    const a = authOf(req);
+    const { id } = params(idParam, req);
+    return db.withAuth(a, async (c) => {
+      const p = await shareLink(c, a, id, req.ip, 'whatsapp');
+      const lead = (await c.query('SELECT name, phone FROM leads WHERE id = $1', [p.lead_id])).rows[0];
+      const phone = normalizeBrPhone(lead.phone);
+      const text = messageFor(p, lead, a.tenantName, p.url);
+      const whatsappUrl = `https://wa.me/${phone ?? ''}?text=${encodeURIComponent(text)}`;
+      return { status: p.status, url: p.url, expiresAt: p.share_expires_at, whatsappUrl, phoneFound: !!phone };
+    });
+  });
+
+  /**
+   * E-mail: envia pela conta de e-mail da empresa (Resend, Marketing → Canais) com o PDF anexo.
+   * Sem e-mail conectado, devolve 422 e a tela oferece abrir no e-mail do próprio vendedor.
+   * Idempotency-Key obrigatória: clique duplo não manda dois e-mails (o Resend deduplica).
+   */
+  app.post('/proposals/:id/share/email', { preHandler: guard(deps) }, async (req) => {
+    const a = authOf(req);
+    const { id } = params(idParam, req);
+    const b = z.object({ to: z.string().trim().toLowerCase().email().max(200).optional(), message: optionalText(2000) }).parse(req.body ?? {});
+    const idem = req.headers['idempotency-key'];
+    if (typeof idem !== 'string' || idem.length < 8 || idem.length > 200) throw badRequest('Header Idempotency-Key obrigatório (8 a 200 caracteres)', 'idempotency_key_required');
+
+    // 1) Confere tudo e gera o link (transação curta; nada de chamada externa aqui dentro)
+    const prep = await db.withAuth(a, async (c) => {
+      const visible = await loadVisibleProposal(c, a, id);
+      const leadEmail = (await c.query('SELECT email FROM leads WHERE id = $1', [visible.lead_id])).rows[0]?.email as string | null;
+      const to = b.to ?? leadEmail?.toLowerCase();
+      const connected = (await c.query(`SELECT 1 FROM tenant_channels WHERE channel = 'email'`)).rowCount;
+      if (!connected) throw unprocessable('Conecte o e-mail da empresa em Marketing → Canais para enviar pelo sistema', 'channel_not_configured');
+      if (!to) throw unprocessable('O lead não tem e-mail; informe o destinatário', 'missing_email');
+      // Só vira "enviada" depois que o provedor aceitar o e-mail (passo 3)
+      const p = await shareLink(c, a, id, req.ip, 'email', false);
+      const lead = (await c.query('SELECT name, company, cnpj FROM leads WHERE id = $1', [p.lead_id])).rows[0];
+      const full = (await c.query('SELECT * FROM proposals WHERE id = $1', [id])).rows[0];
+      const items = (await c.query('SELECT * FROM proposal_items WHERE proposal_id = $1 ORDER BY position', [id])).rows;
+      return { p, lead, full, items, to: to as string };
+    });
+    const key = requireChannelKey(deps);
+    const ch = await db.withAuth(a, (c) => loadChannelCreds(c, a.tenantId, 'email', key));
+    if (!ch || ch.channel !== 'email') throw unprocessable('Conecte o e-mail da empresa em Marketing → Canais', 'channel_not_configured');
+
+    // 2) Envia (fora da transação)
+    const pdf = await renderPdf({ tenantName: a.tenantName, proposal: prep.full, lead: prep.lead, items: prep.items });
+    const text = (b.message ? `${b.message}\n\n` : '') + messageFor(prep.p, prep.lead, a.tenantName, prep.p.url);
+    const html = text
+      .split(/\n{2,}/)
+      .map((para) => `<p>${escapeHtml(para).replace(/\n/g, '<br>').replace(escapeHtml(prep.p.url), `<a href="${escapeHtml(prep.p.url)}">${escapeHtml(prep.p.url)}</a>`)}</p>`)
+      .join('');
+    try {
+      const r = await deps.messaging.sendEmail(
+        ch.creds,
+        {
+          to: prep.to, subject: `Proposta comercial nº ${prep.p.number} — ${a.tenantName}`, html, text, headers: {},
+          attachments: [{ filename: `proposta-${prep.p.number}.pdf`, contentBase64: pdf.toString('base64') }],
+        },
+        `proposal-${id}-${idem}`,
+      );
+      // 3) Aceito pelo provedor: rascunho passa a "enviada" (atômico)
+      const st = await db.withAuth(a, async (c) =>
+        (await c.query(
+          `UPDATE proposals SET status = CASE WHEN status = 'draft' THEN 'sent' ELSE status END,
+                  sent_at = CASE WHEN status = 'draft' THEN now() ELSE sent_at END
+            WHERE id = $1 RETURNING status`, [id],
+        )).rows[0]?.status,
+      );
+      return { ok: true, to: prep.to, status: st, url: prep.p.url, id: r.id };
+    } catch (e) {
+      if (e instanceof ProviderError) throw unprocessable(`O provedor de e-mail recusou: ${e.message}`, 'provider_error');
+      throw e;
+    }
+  });
+
+  /** Para o "abrir no meu e-mail" (sem conta conectada): só gera o link e o texto. */
+  app.post('/proposals/:id/share/link', { preHandler: guard(deps) }, async (req) => {
+    const a = authOf(req);
+    const { id } = params(idParam, req);
+    return db.withAuth(a, async (c) => {
+      const p = await shareLink(c, a, id, req.ip, 'email');
+      const lead = (await c.query('SELECT name, email FROM leads WHERE id = $1', [p.lead_id])).rows[0];
+      return {
+        status: p.status, url: p.url, expiresAt: p.share_expires_at, to: lead.email ?? '',
+        subject: `Proposta comercial nº ${p.number} — ${a.tenantName}`, text: messageFor(p, lead, a.tenantName, p.url),
+      };
+    });
+  });
+}
+
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
+
+/** PDF da proposta pelo link enviado ao cliente (sem login). */
+export async function publicProposalRoutes(app: FastifyInstance, deps: Deps) {
+  app.get('/propostas/:token', async (req, reply) => {
+    await throttle(deps.db.app, [{ key: `proposal-link:ip:${req.ip}`, max: 60, windowSeconds: 60 }]);
+    const { token } = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).safeParse(req.params).data ?? {};
+    if (!token) throw notFound('Link inválido ou vencido');
+    const data = (await deps.db.withAnon((c) => c.query('SELECT proposal_by_share_token($1) AS d', [token]))).rows[0]?.d;
+    if (!data) throw notFound('Link inválido ou vencido');
+    const pdf = await renderPdf(data);
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `inline; filename="proposta-${data.proposal.number}.pdf"`)
+      .header('Cache-Control', 'private, no-store')
+      .header('X-Robots-Tag', 'noindex')
+      .header('Referrer-Policy', 'no-referrer')
       .send(pdf);
   });
 }

@@ -7,7 +7,7 @@ interface Dash {
   kpis: Record<'leads' | 'mqls' | 'wonCount' | 'wonValueCents' | 'avgTicketCents' | 'conversionRate' | 'salesCycleDays' | 'forecastCents', Kpi>;
   revenueBySeller: { seller: string; won: number; valueCents: number }[];
   byChannel: { channel: string; leads: number; won: number; valueCents: number }[];
-  funnel: { stageId: string; name: string; kind: string; leads: number; valueCents: number }[];
+  funnel: { stageId: string; name: string; kind: string; pipeline: string; leads: number; valueCents: number }[];
   alerts: { stalledLeads: number; overdueActivities: number };
 }
 
@@ -56,11 +56,16 @@ export function Dashboard() {
       </div>
       <h2>Funil atual</h2>
       <div className="card stack">
-        {data.funnel.map((f) => (
-          <div key={f.stageId} className="row" style={{ gap: '1rem' }}>
+        {data.funnel.map((f, i) => (
+          <div key={f.stageId} className="stack" style={{ gap: '.4rem' }}>
+          {new Set(data.funnel.map((x) => x.pipeline)).size > 1 && data.funnel[i - 1]?.pipeline !== f.pipeline && (
+            <div className="muted" style={{ fontWeight: 600, marginTop: i ? '.5rem' : 0 }}>{f.pipeline}</div>
+          )}
+          <div className="row" style={{ gap: '1rem' }}>
             <div style={{ width: 150 }}>{f.name}</div>
             <div style={{ flex: 1 }}><div className="bar" style={{ width: `${(f.leads / maxFunnel) * 100}%`, minWidth: f.leads ? 6 : 0 }} /></div>
             <div className="num" style={{ width: 160 }}>{f.leads} · {brl(f.valueCents)}</div>
+          </div>
           </div>
         ))}
       </div>

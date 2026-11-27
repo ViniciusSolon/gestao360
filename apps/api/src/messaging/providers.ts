@@ -9,7 +9,8 @@
  */
 export type Channel = 'email' | 'whatsapp' | 'sms';
 
-export interface EmailMessage { to: string; subject: string; html: string; text: string; headers: Record<string, string> }
+export interface EmailAttachment { filename: string; contentBase64: string }
+export interface EmailMessage { to: string; subject: string; html: string; text: string; headers: Record<string, string>; attachments?: EmailAttachment[] }
 export interface SmsMessage { to: string; text: string }
 export interface WhatsAppMessage { to: string; template: string; language: string; params: string[] }
 
@@ -57,7 +58,10 @@ export class LiveProviders implements MessagingProviders {
     const r = await postJson(
       'https://api.resend.com/emails',
       { Authorization: `Bearer ${c.apiKey}`, 'Idempotency-Key': idempotencyKey },
-      { from: `${c.fromName} <${c.fromEmail}>`, to: [m.to], subject: m.subject, html: m.html, text: m.text, headers: m.headers },
+      {
+        from: `${c.fromName} <${c.fromEmail}>`, to: [m.to], subject: m.subject, html: m.html, text: m.text, headers: m.headers,
+        ...(m.attachments?.length ? { attachments: m.attachments.map((x) => ({ filename: x.filename, content: x.contentBase64 })) } : {}),
+      },
     );
     if (!r.ok || !r.json?.id) throw new ProviderError(`Resend ${r.status}: ${String(r.json?.message ?? 'erro').slice(0, 200)}`, r.status);
     return { id: String(r.json.id) };

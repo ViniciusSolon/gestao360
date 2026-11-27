@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Deps } from '../deps.js';
 import { authOf } from '../auth/guards.js';
-import { notFound } from '../lib/errors.js';
+import { badRequest, notFound } from '../lib/errors.js';
 import { guard, idParam, optionalText, params } from './common.js';
 
 /** Campos do produto SEM padrão (base da edição parcial). */
@@ -24,6 +24,19 @@ const productBody = productFields.extend({
 /** Edição: sem padrões, senão ativar/desativar zerava o tributo e editar reativava o produto. */
 const productPatch = productFields.partial();
 
+export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Descobre o tipo da imagem pelo CONTEÚDO (não confia no nome nem no Content-Type).
+ * Só JPEG, PNG e WebP: SVG fica de fora porque pode carregar script.
+ */
+export function sniffImage(b: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' | null {
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (b.length >= 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
+
 export async function productRoutes(app: FastifyInstance, deps: Deps) {
   const { db } = deps;
 
@@ -32,8 +45,10 @@ export async function productRoutes(app: FastifyInstance, deps: Deps) {
     const { active } = z.object({ active: z.enum(['true', 'false']).optional() }).parse(req.query);
     return db.withAuth(a, async (c) => {
       const r = await c.query(
-        `SELECT id, sku, name, description, price_cents, ncm, tax_rate_bp, photo_url, active FROM products
-          WHERE ($1::boolean IS NULL OR active = $1) ORDER BY name`,
+        `SELECT p.id, p.sku, p.name, p.description, p.price_cents, p.ncm, p.tax_rate_bp, p.photo_url, p.active,
+                i.updated_at AS image_updated_at
+           FROM products p LEFT JOIN product_images i ON i.product_id = p.id
+          WHERE ($1::boolean IS NULL OR p.active = $1) ORDER BY p.name`,
         [active === undefined ? null : active === 'true'],
       );
       return r.rows;
@@ -68,6 +83,56 @@ export async function productRoutes(app: FastifyInstance, deps: Deps) {
       );
       if (!r.rowCount) throw notFound('Produto não encontrado');
       return r.rows[0];
+    });
+  });
+
+  // ---- Foto do produto (upload direto, guardada no Postgres) ----
+  await app.register(async (img) => {
+    // Corpo cru da imagem (até 2 MB); o tipo real é conferido pelos bytes
+    img.addContentTypeParser(/^image\//, { parseAs: 'buffer', bodyLimit: MAX_IMAGE_BYTES }, (_req, body, done) => done(null, body));
+
+    img.put('/products/:id/image', { preHandler: guard(deps, 'manager'), bodyLimit: MAX_IMAGE_BYTES }, async (req) => {
+      const a = authOf(req);
+      const { id } = params(idParam, req);
+      const body = req.body;
+      if (!Buffer.isBuffer(body) || !body.length) throw badRequest('Envie a imagem (JPEG, PNG ou WebP)');
+      const mime = sniffImage(body);
+      if (!mime) throw badRequest('Formato não aceito. Use JPEG, PNG ou WebP.');
+      return db.withAuth(a, async (c) => {
+        const exists = (await c.query('SELECT 1 FROM products WHERE id = $1', [id])).rowCount;
+        if (!exists) throw notFound('Produto não encontrado');
+        const r = await c.query(
+          `INSERT INTO product_images (tenant_id, product_id, mime, content) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (tenant_id, product_id) DO UPDATE SET mime = EXCLUDED.mime, content = EXCLUDED.content, updated_at = now()
+           RETURNING updated_at`,
+          [a.tenantId, id, mime, body],
+        );
+        return { ok: true, imageUpdatedAt: r.rows[0].updated_at };
+      });
+    });
+  });
+
+  app.get('/products/:id/image', { preHandler: guard(deps) }, async (req, reply) => {
+    const a = authOf(req);
+    const { id } = params(idParam, req);
+    const row = await db.withAuth(a, async (c) => (await c.query('SELECT mime, content FROM product_images WHERE product_id = $1', [id])).rows[0]);
+    if (!row) throw notFound('Produto sem foto');
+    return reply
+      .header('Content-Type', row.mime)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Content-Security-Policy', "default-src 'none'")
+      // A URL leva ?v=<data da foto>: trocar a foto muda a URL, então pode guardar em cache
+      .header('Cache-Control', 'private, max-age=31536000, immutable')
+      .send(row.content);
+  });
+
+  app.delete('/products/:id/image', { preHandler: guard(deps, 'manager') }, async (req) => {
+    const a = authOf(req);
+    const { id } = params(idParam, req);
+    return db.withAuth(a, async (c) => {
+      const r = await c.query('DELETE FROM product_images WHERE product_id = $1', [id]);
+      if (!r.rowCount) throw notFound('Produto sem foto');
+      return { ok: true };
     });
   });
 }

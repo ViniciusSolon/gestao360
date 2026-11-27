@@ -123,7 +123,12 @@ export async function leadRoutes(app: FastifyInstance, deps: Deps) {
     const lead = await db.withAuth(a, async (c) => {
       const stage = b.stageId
         ? (await c.query('SELECT id, kind FROM pipeline_stages WHERE id = $1', [b.stageId])).rows[0]
-        : (await c.query(`SELECT id, kind FROM pipeline_stages WHERE kind = 'open' ORDER BY position LIMIT 1`)).rows[0];
+        : (
+            await c.query(
+              `SELECT s.id, s.kind FROM pipeline_stages s JOIN pipelines p ON p.id = s.pipeline_id
+                WHERE s.kind = 'open' ORDER BY p.position, p.created_at, s.position LIMIT 1`,
+            )
+          ).rows[0];
       if (!stage) throw unprocessable('Etapa inválida', 'invalid_stage');
       if (stage.kind !== 'open') throw unprocessable('Novos leads entram em etapa aberta', 'invalid_stage');
       await consumeLeadQuota(c);

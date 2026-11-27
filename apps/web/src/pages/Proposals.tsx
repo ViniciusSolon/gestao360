@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { api, brl, dateBR, toCents, useApi, useIdempotencyKey, useSubmit } from '../lib/api';
+import { api, ApiError, brl, dateBR, toCents, useApi, useIdempotencyKey, useSubmit } from '../lib/api';
 
 export function Proposals() {
   const { data } = useApi<any[]>('/proposals');
@@ -119,10 +119,13 @@ export function ProposalView() {
     <div className="stack">
       <div className="row between">
         <h1>Proposta #{p.number} <span className={`badge ${p.status}`}>{p.status}</span></h1>
-        <div className="row">
-          <a href={`/api/proposals/${p.id}/pdf`} target="_blank" rel="noopener"><button className="secondary">PDF</button></a>
-          {p.status === 'draft' && <button disabled={act.busy} onClick={() => act.run('send')}>Marcar como enviada</button>}
-          {p.status === 'sent' && <><button disabled={act.busy} onClick={() => act.run('accept')}>Aceita</button><button className="danger" disabled={act.busy} onClick={() => act.run('reject')}>Recusada</button></>}
+        <div className="prop-actions">
+          <div className="row">
+            <a href={`/api/proposals/${p.id}/pdf`} target="_blank" rel="noopener"><button className="secondary">PDF</button></a>
+            {p.status === 'draft' && <button disabled={act.busy} onClick={() => act.run('send')}>Marcar como enviada</button>}
+            {p.status === 'sent' && <><button disabled={act.busy} onClick={() => act.run('accept')}>Aceita</button><button className="danger" disabled={act.busy} onClick={() => act.run('reject')}>Recusada</button></>}
+          </div>
+          {(p.status === 'draft' || p.status === 'sent') && <SendButtons proposal={p} onSent={reload} />}
         </div>
       </div>
       {act.error && <div className="error">{act.error}</div>}
@@ -138,6 +141,99 @@ export function ProposalView() {
         <div className="row between"><span>Frete</span><span>{brl(p.freight_cents)}</span></div>
         <div className="row between" style={{ fontWeight: 700 }}><span>Total</span><span>{brl(p.total_cents)}</span></div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Enviar ao cliente: WhatsApp (abre o WhatsApp do vendedor com a mensagem e o link da
+ * proposta) e e-mail (sai pela conta de e-mail da empresa, com o PDF anexo).
+ * Os dois marcam a proposta como enviada.
+ */
+function SendButtons({ proposal, onSent }: { proposal: any; onSent: () => void }) {
+  const [mailOpen, setMailOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const wa = useSubmit(async () => {
+    // Abre a aba já no clique (senão o navegador bloqueia como pop-up) e depois aponta para o WhatsApp
+    const win = window.open('', '_blank');
+    try {
+      const r = await api<{ whatsappUrl: string; phoneFound: boolean }>(`/proposals/${proposal.id}/share/whatsapp`, { method: 'POST' });
+      if (win) { win.opener = null; win.location.href = r.whatsappUrl; } else location.href = r.whatsappUrl;
+      setNotice(r.phoneFound ? 'WhatsApp aberto com a mensagem pronta. É só enviar.' : 'O lead não tem celular válido: escolha o contato no WhatsApp.');
+      onSent();
+    } catch (e) {
+      win?.close();
+      throw e;
+    }
+  });
+  return (
+    <div className="send-buttons">
+      <button type="button" className="btn-wa" disabled={wa.busy} onClick={() => wa.run()}>
+        <span aria-hidden>💬</span> Enviar pelo WhatsApp
+      </button>
+      <button type="button" className="btn-mail" onClick={() => setMailOpen(true)}>
+        <span aria-hidden>✉</span> Enviar por e-mail
+      </button>
+      {(wa.error || notice) && <div className={wa.error ? 'error' : 'muted'} role="status">{wa.error ?? notice}</div>}
+      {mailOpen && <EmailDialog proposal={proposal} onClose={() => setMailOpen(false)} onSent={(msg) => { setMailOpen(false); setNotice(msg); onSent(); }} />}
+    </div>
+  );
+}
+
+function EmailDialog({ proposal, onClose, onSent }: { proposal: any; onClose: () => void; onSent: (msg: string) => void }) {
+  const lead = useApi<{ email: string | null; name: string }>(`/leads/${proposal.lead_id}`);
+  const [to, setTo] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
+  const [noChannel, setNoChannel] = useState(false);
+  const idem = useIdempotencyKey();
+  const toValue = to ?? lead.data?.email ?? '';
+
+  const send = useSubmit(async () => {
+    try {
+      const r = await api<{ to: string }>(`/proposals/${proposal.id}/share/email`, {
+        method: 'POST', body: { to: toValue || undefined, message: message.trim() || undefined }, idempotencyKey: idem.key(),
+      });
+      idem.renew();
+      onSent(`Proposta enviada por e-mail para ${r.to}, com o PDF anexo.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'channel_not_configured') { setNoChannel(true); return; }
+      throw e;
+    }
+  });
+  // Sem e-mail da empresa conectado: abre o e-mail do próprio vendedor com tudo preenchido
+  const openMailApp = useSubmit(async () => {
+    const r = await api<{ to: string; subject: string; text: string }>(`/proposals/${proposal.id}/share/link`, { method: 'POST' });
+    const body = (message.trim() ? `${message.trim()}\n\n` : '') + r.text;
+    location.href = `mailto:${encodeURIComponent(toValue || r.to)}?subject=${encodeURIComponent(r.subject)}&body=${encodeURIComponent(body)}`;
+    onSent('Seu programa de e-mail foi aberto com a mensagem e o link da proposta.');
+  });
+
+  return (
+    <div className="modal-bg" role="dialog" aria-modal="true" aria-labelledby="mail-title" onClick={onClose}>
+      <form className="card modal stack" onClick={(e) => e.stopPropagation()} onSubmit={(e: FormEvent) => { e.preventDefault(); send.run(); }}>
+        <h2 id="mail-title" style={{ marginTop: 0 }}>Enviar proposta #{proposal.number} por e-mail</h2>
+        <label>Para
+          <input type="email" required value={toValue} onChange={(e) => setTo(e.target.value)} placeholder="cliente@empresa.com.br" />
+        </label>
+        <label>Mensagem (opcional)
+          <textarea rows={4} value={message} maxLength={2000} onChange={(e) => setMessage(e.target.value)} placeholder="Ex.: Conforme conversamos, segue nossa proposta." />
+        </label>
+        <p className="muted" style={{ margin: 0, fontSize: '.85rem' }}>
+          Vai com o PDF anexo e um link para o cliente ver a proposta online (válido por 30 dias).
+        </p>
+        {noChannel ? (
+          <div className="banner" style={{ margin: 0 }}>
+            O e-mail da empresa ainda não está conectado (Marketing → Canais). Você pode enviar pelo seu próprio programa de e-mail.
+          </div>
+        ) : send.error && <div className="error">{send.error}</div>}
+        {openMailApp.error && <div className="error">{openMailApp.error}</div>}
+        <div className="row">
+          {noChannel
+            ? <button type="button" disabled={openMailApp.busy} onClick={() => openMailApp.run()}>Abrir no meu e-mail</button>
+            : <button disabled={send.busy || lead.loading}>{send.busy ? 'Enviando…' : 'Enviar'}</button>}
+          <button type="button" className="secondary" onClick={onClose}>Cancelar</button>
+        </div>
+      </form>
     </div>
   );
 }

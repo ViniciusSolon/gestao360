@@ -84,9 +84,12 @@ export async function provisionTenant(c: Client, input: NewTenantInput, appPubli
   await c.query(`INSERT INTO tenants (id, name, slug, plan_id, status) VALUES ($1, $2, $3, $4, 'active')`, [
     tenantId, input.companyName.trim(), input.slug, plan.id,
   ]);
+  const pipelineId = (
+    await c.query<{ id: string }>(`INSERT INTO pipelines (tenant_id, name, position) VALUES ($1, 'Funil comercial', 0) RETURNING id`, [tenantId])
+  ).rows[0].id;
   for (const [i, [name, prob, kind]] of DEFAULT_STAGES.entries()) {
-    await c.query(`INSERT INTO pipeline_stages (tenant_id, name, position, probability, kind) VALUES ($1, $2, $3, $4, $5)`, [
-      tenantId, name, i, prob, kind,
+    await c.query(`INSERT INTO pipeline_stages (tenant_id, pipeline_id, name, position, probability, kind) VALUES ($1, $2, $3, $4, $5, $6)`, [
+      tenantId, pipelineId, name, i, prob, kind,
     ]);
   }
   await audit(c, {

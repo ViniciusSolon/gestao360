@@ -55,10 +55,11 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
         p,
       );
       const funnel = await c.query(
-        `SELECT s.id, s.name, s.kind, s.probability, count(l.id) AS leads, coalesce(sum(l.value_cents), 0) AS value_cents
+        `SELECT s.id, s.name, s.kind, s.probability, pl.name AS pipeline_name, count(l.id) AS leads, coalesce(sum(l.value_cents), 0) AS value_cents
            FROM pipeline_stages s
+           JOIN pipelines pl ON pl.id = s.pipeline_id
            LEFT JOIN leads l ON l.stage_id = s.id ${mine ? 'AND l.owner_id = $1' : 'AND $1::uuid IS NULL'}
-          GROUP BY s.id ORDER BY s.position`,
+          GROUP BY s.id, pl.id ORDER BY pl.position, pl.created_at, s.position`,
         [mine ? a.userId : null],
       );
       const forecast = funnel.rows
@@ -90,7 +91,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
         },
         revenueBySeller: bySeller.rows.map((r) => ({ seller: r.seller, won: Number(r.won), valueCents: Number(r.value_cents) })),
         byChannel: byChannel.rows.map((r) => ({ channel: r.channel, leads: Number(r.leads), won: Number(r.won), valueCents: Number(r.value_cents) })),
-        funnel: funnel.rows.map((r) => ({ stageId: r.id, name: r.name, kind: r.kind, leads: Number(r.leads), valueCents: Number(r.value_cents) })),
+        funnel: funnel.rows.map((r) => ({ stageId: r.id, name: r.name, kind: r.kind, pipeline: r.pipeline_name, leads: Number(r.leads), valueCents: Number(r.value_cents) })),
         alerts: { stalledLeads: Number(alerts.stalled), overdueActivities: Number(alerts.overdue) },
       };
     });

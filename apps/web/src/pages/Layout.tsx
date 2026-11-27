@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { api, can, ROLE_LABEL } from '../lib/api';
 import { useSession } from '../lib/session';
 import { createPipelineInteractive, usePipelines } from '../lib/pipelines';
+import { ThemeToggle } from '../lib/theme';
 
 /** Abas de Indicadores. A primeira é Marketing (gerente para cima). */
 export function indicatorTabs(role: Parameters<typeof can>[0]) {
@@ -83,6 +84,7 @@ export function AppLayout() {
         <NavLink to="/app/produtos">Produtos</NavLink>
         <NavLink to="/app/assinatura">Assinatura</NavLink>
         <div className="spacer" />
+        <ThemeToggle />
         <button className="secondary" onClick={logout}>Sair</button>
       </nav>
       <main className="main">

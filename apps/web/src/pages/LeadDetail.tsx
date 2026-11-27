@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useSession } from '../lib/session';
 import { usePipelines } from '../lib/pipelines';
-import { api, brl, CHANNELS, dateBR, dateTimeBR, formatCnpj, maskCnpj, useApi, useSubmit } from '../lib/api';
+import { api, brl, CHANNELS, PROPOSAL_STATUS, dateBR, dateTimeBR, formatCnpj, maskCnpj, useApi, useSubmit } from '../lib/api';
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'Lead criado', updated: 'Dados atualizados', stage_changed: 'Mudou de etapa', activity_created: 'Atividade criada',
@@ -109,7 +109,6 @@ export function LeadDetail() {
         <div><div className="muted">Fonte</div>{CHANNELS[lead.channel] ?? lead.channel}{lead.campaign ? ` · ${lead.campaign}` : ''}</div>
         <div><div className="muted">Valor</div>{brl(lead.value_cents)}</div>
         <div><div className="muted">Pontuação</div>{lead.score} {lead.is_mql && <span className="badge">MQL</span>}</div>
-        <div><div className="muted">Previsão</div>{dateBR(lead.expected_close_date)}</div>
         {lead.lost_reason && <div><div className="muted">Motivo da perda</div>{lead.lost_reason}</div>}
       </div>
 
@@ -131,7 +130,7 @@ export function LeadDetail() {
 
       <h2>Propostas</h2>
       <table><tbody>
-        {lead.proposals.map((p: any) => <tr key={p.id}><td><Link to={`/app/propostas/${p.id}`}>#{p.number}</Link></td><td><span className={`badge ${p.status}`}>{p.status}</span></td><td className="num">{brl(p.total_cents)}</td></tr>)}
+        {lead.proposals.map((p: any) => <tr key={p.id}><td><Link to={`/app/propostas/${p.id}`}>#{p.number}</Link></td><td><span className={`badge ${p.status}`}>{PROPOSAL_STATUS[p.status] ?? p.status}</span></td><td className="num">{brl(p.total_cents)}</td></tr>)}
         {!lead.proposals.length && <tr><td className="muted">Nenhuma proposta</td></tr>}
       </tbody></table>
 

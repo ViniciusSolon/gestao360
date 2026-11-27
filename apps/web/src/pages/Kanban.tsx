@@ -1,12 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
-import { api, brl, can, formatCnpj, LEGACY_SOURCES, SOURCES, maskCnpj, toCents, useApi, useSubmit } from '../lib/api';
+import { api, brl, can, dateBR, dateTimeBR, formatCnpj, LEGACY_SOURCES, SOURCES, maskCnpj, toCents, useApi, useSubmit } from '../lib/api';
 import { useSession } from '../lib/session';
 import { createPipelineInteractive, usePipelines, type Pipeline, type Stage } from '../lib/pipelines';
 
 export interface Lead {
   id: string; name: string; company: string | null; cnpj: string | null; stage_id: string; status: string; score: number; is_mql: boolean;
-  value_cents: string; owner_name: string | null; channel: string;
+  value_cents: string; owner_name: string | null; channel: string; created_at: string; updated_at: string;
 }
 
 /** /app/funil abre o primeiro funil. */
@@ -144,6 +144,10 @@ export function Kanban() {
                   <div className="s row">
                     <span>Score {l.score}</span>{l.is_mql && <span className="badge">MQL</span>}<span>{l.owner_name ?? 'sem responsável'}</span>
                   </div>
+                  <div className="s lead-dates">
+                    <span title={`Criado em ${dateTimeBR(l.created_at)}`}>Criado {dateBR(l.created_at)}</span>
+                    <span title={`Atualizado em ${dateTimeBR(l.updated_at)}`}>Atualizado {dateBR(l.updated_at)}</span>
+                  </div>
                   <Link to={`/app/leads/${l.id}`} className="lead-open" aria-label={`Abrir ${l.name}`} draggable={false}>Abrir →</Link>
                 </div>
               ))}
@@ -172,7 +176,7 @@ export function Kanban() {
 function NewLead({ pipelines, initial, onClose, onCreated }: { pipelines: Pipeline[]; initial: Pipeline; onClose: () => void; onCreated: () => void }) {
   const [pipelineId, setPipelineId] = useState(initial.id);
   const stageId = pipelines.find((p) => p.id === pipelineId)?.stages.find((s) => s.kind === 'open')?.id;
-  const [f, setF] = useState({ name: '', company: '', cnpj: '', email: '', phone: '', channel: 'google_ads', campaign: '', value: '', expectedCloseDate: '' });
+  const [f, setF] = useState({ name: '', company: '', cnpj: '', email: '', phone: '', channel: 'google_ads', campaign: '', value: '' });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const submit = useSubmit(async (e: FormEvent) => {
     e.preventDefault();
@@ -180,7 +184,7 @@ function NewLead({ pipelines, initial, onClose, onCreated }: { pipelines: Pipeli
       method: 'POST',
       body: {
         name: f.name, company: f.company || null, cnpj: f.cnpj || null, email: f.email || null, phone: f.phone || null, channel: f.channel, campaign: f.campaign || null,
-        valueCents: f.value ? toCents(f.value) : 0, expectedCloseDate: f.expectedCloseDate || null, stageId,
+        valueCents: f.value ? toCents(f.value) : 0, stageId,
       },
     });
     onCreated();
@@ -212,7 +216,6 @@ function NewLead({ pipelines, initial, onClose, onCreated }: { pipelines: Pipeli
           </label>
           <label>Campanha<input value={f.campaign} onChange={set('campaign')} placeholder="Ex.: Black Friday" /></label>
           <label>Valor estimado (R$)<input inputMode="decimal" value={f.value} onChange={set('value')} placeholder="0,00" /></label>
-          <label>Previsão de fechamento<input type="date" value={f.expectedCloseDate} onChange={set('expectedCloseDate')} /></label>
         </div>
         {submit.error && <div className="error">{submit.error}</div>}
         <div className="row"><button disabled={submit.busy}>Salvar</button><button type="button" className="secondary" onClick={onClose}>Cancelar</button></div>

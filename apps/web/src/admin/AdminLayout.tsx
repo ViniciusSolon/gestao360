@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { ThemeToggle } from '../lib/theme';
 import { api, useApi, useSubmit } from '../lib/api';
 
 export interface PlatformMe { adminId: string; email: string; name: string; role: 'superadmin' | 'support' }
@@ -21,6 +22,7 @@ export function AdminLayout() {
         <NavLink to="/admin" end>Clientes</NavLink>
         <NavLink to="/admin/auditoria">Auditoria</NavLink>
         <div className="spacer" />
+        <ThemeToggle />
         <button className="secondary" onClick={async () => { await api('/platform/auth/logout', { method: 'POST' }).catch(() => {}); nav('/admin/login'); }}>Sair</button>
       </nav>
       <main className="main"><Outlet context={me.data} /></main>

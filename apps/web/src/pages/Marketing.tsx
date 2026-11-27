@@ -204,7 +204,7 @@ const SERIES = [
 ] as const;
 
 /** Escala com passos redondos (1, 2 ou 5 × 10ⁿ) e no máximo ~5 marcas inteiras. */
-function niceScale(v: number) {
+export function niceScale(v: number) {
   const raw = Math.max(1, v) / 4;
   const p = 10 ** Math.floor(Math.log10(raw));
   const step = Math.max(1, [1, 2, 5, 10].map((m) => m * p).find((x) => x >= raw) ?? 10 * p);

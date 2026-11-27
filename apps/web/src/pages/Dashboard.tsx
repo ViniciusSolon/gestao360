@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { brl, CHANNELS, useApi } from '../lib/api';
 import { useSession } from '../lib/session';
 import { usePipelines } from '../lib/pipelines';
+import { RevenueGoals } from './RevenueGoals';
 
 interface Kpi { value: number; origin: string }
 interface Dash {
@@ -11,6 +12,7 @@ interface Dash {
   byChannel: { channel: string; leads: number; won: number; valueCents: number }[];
   funnel: { stageId: string; name: string; kind: string; pipeline: string; leads: number; valueCents: number }[];
   alerts: { stalledLeads: number; overdueActivities: number };
+  forecastByTemperature: { hot: number; warm: number; cold: number; proposals: number };
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -33,7 +35,7 @@ export function Dashboard() {
     ['Ticket médio', brl(k.avgTicketCents.value), k.avgTicketCents],
     ['Conversão', `${(k.conversionRate.value * 100).toFixed(1)}%`, k.conversionRate],
     ['Ciclo de vendas', `${k.salesCycleDays.value} dias`, k.salesCycleDays],
-    ['Previsão (pipeline)', brl(k.forecastCents.value), k.forecastCents],
+    ['Previsão de fechamento', brl(k.forecastCents.value), k.forecastCents],
   ];
   const maxFunnel = Math.max(1, ...data.funnel.map((f) => f.leads));
   return (
@@ -63,6 +65,13 @@ export function Dashboard() {
           </div>
         ))}
       </div>
+      {data.forecastByTemperature.proposals > 0 && (
+        <p className="muted forecast-temp">
+          Previsão por temperatura ({data.forecastByTemperature.proposals} proposta(s)):
+          {' '}🔥 Quente {brl(data.forecastByTemperature.hot)} · 🌤 Morno {brl(data.forecastByTemperature.warm)} · ❄ Frio {brl(data.forecastByTemperature.cold)}
+        </p>
+      )}
+      <RevenueGoals pipelineId={pipelineId} />
       <h2>Funil atual{pipelineId && pipes.data ? ` · ${pipes.data.find((p) => p.id === pipelineId)?.name ?? ''}` : ''}</h2>
       <div className="card stack">
         {data.funnel.map((f, i) => (

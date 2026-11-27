@@ -150,3 +150,8 @@ export const SOURCES: [string, string][] = [
 ];
 export const LEGACY_SOURCES = new Set(['site', 'evento', 'email', 'telefone', 'redes_sociais']);
 export const CHANNELS: Record<string, string> = Object.fromEntries(SOURCES);
+
+/** Situação da proposta e temperatura (rótulos em português). */
+export const PROPOSAL_STATUS: Record<string, string> = { draft: 'Rascunho', sent: 'Enviada', accepted: 'Aceita', rejected: 'Recusada' };
+export const TEMPERATURE: Record<string, string> = { hot: 'Quente', warm: 'Morno', cold: 'Frio' };
+export const TEMPERATURE_ICON: Record<string, string> = { hot: '🔥', warm: '🌤', cold: '❄' };

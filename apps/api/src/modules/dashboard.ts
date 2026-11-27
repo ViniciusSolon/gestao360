@@ -4,6 +4,7 @@ import type { Deps } from '../deps.js';
 import { authOf } from '../auth/guards.js';
 import { atLeast } from '../auth/roles.js';
 import { notFound } from '../lib/errors.js';
+import { audit } from '../lib/limits.js';
 import { guard } from './common.js';
 
 const query = z.object({
@@ -70,9 +71,18 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
           GROUP BY s.id, pl.id ORDER BY pl.position, pl.created_at, s.position`,
         [mine ? a.userId : null, q.pipelineId ?? null],
       );
-      const forecast = funnel.rows
-        .filter((s) => s.kind === 'open')
-        .reduce((acc, s) => acc + Math.round((Number(s.value_cents) * s.probability) / 100), 0);
+      // Previsão de fechamento: propostas em aberto (rascunho/enviada) com previsão dentro do período
+      const fc = await c.query(
+        `SELECT coalesce(sum(p.total_cents), 0) AS total, count(*) AS n,
+                coalesce(sum(p.total_cents) FILTER (WHERE p.temperature = 'hot'), 0)  AS hot,
+                coalesce(sum(p.total_cents) FILTER (WHERE p.temperature = 'warm'), 0) AS warm,
+                coalesce(sum(p.total_cents) FILTER (WHERE p.temperature = 'cold'), 0) AS cold
+           FROM proposals p JOIN leads l ON l.id = p.lead_id
+          WHERE p.status IN ('draft','sent') AND p.expected_close_date BETWEEN $1::date AND $2::date
+            ${mine ? 'AND p.owner_id = $3' : 'AND $3::uuid IS NULL'} ${inPipe(4)}`,
+        [from.toISOString().slice(0, 10), to.toISOString().slice(0, 10), mine ? a.userId : null, q.pipelineId ?? null],
+      );
+      const forecast = Number(fc.rows[0].total);
       const alerts = (
         await c.query(
           `SELECT
@@ -96,13 +106,63 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
           avgTicketCents: { value: won ? Math.round(wonValue / won) : 0, origin: 'Valor ganho ÷ negócios ganhos' },
           conversionRate: { value: won + lost ? won / (won + lost) : 0, origin: 'Ganhos ÷ (ganhos + perdidos) fechados no período' },
           salesCycleDays: { value: kpi.cycle_days ? Number(Number(kpi.cycle_days).toFixed(1)) : 0, origin: 'Média de dias entre criação e ganho' },
-          forecastCents: { value: forecast, origin: 'Σ valor dos leads abertos × probabilidade da etapa' },
+          forecastCents: { value: forecast, origin: 'Σ propostas em aberto com previsão de fechamento no período' },
         },
         revenueBySeller: bySeller.rows.map((r) => ({ seller: r.seller, won: Number(r.won), valueCents: Number(r.value_cents) })),
         byChannel: byChannel.rows.map((r) => ({ channel: r.channel, leads: Number(r.leads), won: Number(r.won), valueCents: Number(r.value_cents) })),
         funnel: funnel.rows.map((r) => ({ stageId: r.id, name: r.name, kind: r.kind, pipeline: r.pipeline_name, leads: Number(r.leads), valueCents: Number(r.value_cents) })),
         alerts: { stalledLeads: Number(alerts.stalled), overdueActivities: Number(alerts.overdue) },
+        forecastByTemperature: { hot: Number(fc.rows[0].hot), warm: Number(fc.rows[0].warm), cold: Number(fc.rows[0].cold), proposals: Number(fc.rows[0].n) },
       };
+    });
+  });
+
+  /**
+   * Metas x Receita por mês (últimos N meses). Receita = soma dos leads ganhos no mês
+   * (mesma regra do "Valor vendido"). Meta = meta de receita gravada para o mês.
+   */
+  app.get('/dashboard/revenue-goals', { preHandler: guard(deps) }, async (req) => {
+    const a = authOf(req);
+    const q = z.object({ months: z.coerce.number().int().min(3).max(36).default(12), pipelineId: z.string().uuid().optional() }).parse(req.query);
+    const mine = !atLeast(a.role, 'manager');
+    return deps.db.withAuth(a, async (c) => {
+      if (q.pipelineId && !(await c.query('SELECT 1 FROM pipelines WHERE id = $1', [q.pipelineId])).rowCount) throw notFound('Funil não encontrado');
+      const r = await c.query(
+        `WITH months AS (
+           SELECT generate_series(date_trunc('month', now()) - make_interval(months => $1 - 1), date_trunc('month', now()), interval '1 month')::date AS m)
+         SELECT to_char(m.m, 'YYYY-MM') AS month,
+                (SELECT target FROM metric_goals g WHERE g.metric = 'revenue' AND g.month = m.m) AS goal,
+                (SELECT coalesce(sum(l.value_cents), 0) FROM leads l
+                  WHERE l.status = 'won' AND l.closed_at >= m.m AND l.closed_at < m.m + interval '1 month'
+                    ${mine ? 'AND l.owner_id = $2' : 'AND $2::uuid IS NULL'}
+                    AND ($3::uuid IS NULL OR l.stage_id IN (SELECT id FROM pipeline_stages WHERE pipeline_id = $3))) AS revenue
+           FROM months m ORDER BY m.m`,
+        [q.months, mine ? a.userId : null, q.pipelineId ?? null],
+      );
+      return r.rows.map((x) => ({ month: x.month, goalCents: x.goal === null ? null : Number(x.goal), revenueCents: Number(x.revenue) }));
+    });
+  });
+
+  /** Define (ou apaga, com null) a meta de receita do mês. Gerente para cima. */
+  app.put('/dashboard/revenue-goals', { preHandler: guard(deps, 'manager') }, async (req) => {
+    const a = authOf(req);
+    const b = z.object({
+      month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Mês no formato AAAA-MM'),
+      targetCents: z.number().int().min(0).max(1e13).nullable(),
+    }).parse(req.body);
+    const month = `${b.month}-01`;
+    return deps.db.withAuth(a, async (c) => {
+      if (b.targetCents === null) {
+        await c.query(`DELETE FROM metric_goals WHERE metric = 'revenue' AND month = $1::date`, [month]);
+      } else {
+        await c.query(
+          `INSERT INTO metric_goals (tenant_id, metric, month, target, updated_by) VALUES ($1, 'revenue', $2::date, $3, $4)
+           ON CONFLICT (tenant_id, metric, month) DO UPDATE SET target = EXCLUDED.target, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+          [a.tenantId, month, b.targetCents, a.userId],
+        );
+      }
+      await audit(c, { tenantId: a.tenantId, actorType: 'user', actorId: a.userId, action: 'goal.revenue_set', metadata: b, ip: req.ip });
+      return { ok: true };
     });
   });
 }

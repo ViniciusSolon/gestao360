@@ -6,7 +6,7 @@ import type { Deps } from '../deps.js';
 import type { Client } from '../db/db.js';
 import { authOf, type TenantAuth } from '../auth/guards.js';
 import { atLeast } from '../auth/roles.js';
-import { badRequest, conflict, notFound, unprocessable } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors.js';
 import { normalizeBrPhone } from '../lib/phone.js';
 import { throttle } from '../lib/throttle.js';
 import { ProviderError } from '../messaging/providers.js';
@@ -34,7 +34,32 @@ const proposalBody = z.object({
   paymentTerms: optionalText(500),
   validUntil: z.string().date().optional().nullable(),
   notes: optionalText(5000),
+  ownerId: z.string().uuid().optional(),
+  temperature: z.enum(['hot', 'warm', 'cold']).nullable().optional(),
+  expectedCloseDate: z.string().date().nullable().optional(),
 });
+/** Edição do que não mexe em valor: responsável, temperatura e previsão de fechamento. */
+const proposalPatch = z.object({
+  ownerId: z.string().uuid().optional(),
+  temperature: z.enum(['hot', 'warm', 'cold']).nullable().optional(),
+  expectedCloseDate: z.string().date().nullable().optional(),
+});
+const listQuery = z.object({
+  leadId: z.string().uuid().optional(),
+  status: z.enum(['draft', 'sent', 'accepted', 'rejected']).optional(),
+  ownerId: z.string().uuid().optional(),
+  temperature: z.enum(['hot', 'warm', 'cold']).optional(),
+  q: z.string().trim().max(100).optional(),
+});
+
+/** Responsável da proposta: vendedor só pode ser ele mesmo; gerente+ escolhe um usuário ativo. */
+async function resolveProposalOwner(c: Client, a: TenantAuth, requested: string | undefined) {
+  if (!requested || requested === a.userId) return a.userId;
+  if (!atLeast(a.role, 'manager')) throw forbidden('Vendedor só pode ser o responsável das próprias propostas');
+  const u = (await c.query('SELECT 1 FROM users WHERE id = $1 AND active', [requested])).rowCount;
+  if (!u) throw unprocessable('Responsável não encontrado ou inativo', 'invalid_owner');
+  return requested;
+}
 
 /** Busca proposta visível ao usuário (vendedor: só de leads visíveis a ele). */
 async function loadVisibleProposal(c: Client, a: TenantAuth, id: string, forUpdate = false) {
@@ -104,15 +129,23 @@ export async function proposalRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/proposals', { preHandler: guard(deps) }, async (req) => {
     const a = authOf(req);
-    const { leadId } = z.object({ leadId: z.string().uuid().optional() }).parse(req.query);
+    const f = listQuery.parse(req.query);
     return db.withAuth(a, async (c) => {
-      const scope = atLeast(a.role, 'manager') ? 'true' : '(l.owner_id = $2 OR l.owner_id IS NULL)';
+      const scope = atLeast(a.role, 'manager') ? 'true' : '(l.owner_id = $7 OR l.owner_id IS NULL)';
+      const qText = f.q ? `%${f.q.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
+      const qCnpj = f.q ? f.q.toUpperCase().replace(/[^0-9A-Z]/g, '') : '';
+      const params: unknown[] = [f.leadId ?? null, f.status ?? null, f.ownerId ?? null, f.temperature ?? null, qText, qCnpj.length >= 3 ? `%${qCnpj}%` : null];
+      if (!atLeast(a.role, 'manager')) params.push(a.userId);
       const r = await c.query(
-        `SELECT p.id, p.number, p.status, p.total_cents, p.created_at, p.lead_id, l.name AS lead_name, l.company
-           FROM proposals p JOIN leads l ON l.id = p.lead_id
-          WHERE ($1::uuid IS NULL OR p.lead_id = $1) AND ${scope}
+        `SELECT p.id, p.number, p.status, p.total_cents, p.created_at, p.sent_at, p.lead_id, l.name AS lead_name, l.company, l.cnpj,
+                p.owner_id, u.name AS owner_name, p.temperature, p.expected_close_date
+           FROM proposals p JOIN leads l ON l.id = p.lead_id LEFT JOIN users u ON u.id = p.owner_id
+          WHERE ($1::uuid IS NULL OR p.lead_id = $1) AND ($2::text IS NULL OR p.status = $2)
+            AND ($3::uuid IS NULL OR p.owner_id = $3) AND ($4::text IS NULL OR p.temperature = $4)
+            AND ($5::text IS NULL OR lower(l.name) LIKE $5 OR lower(coalesce(l.company, '')) LIKE $5 OR ($6::text IS NOT NULL AND l.cnpj LIKE $6))
+            AND ${scope}
           ORDER BY p.number DESC LIMIT 500`,
-        atLeast(a.role, 'manager') ? [leadId ?? null] : [leadId ?? null, a.userId],
+        params,
       );
       return r.rows;
     });
@@ -141,13 +174,15 @@ export async function proposalRoutes(app: FastifyInstance, deps: Deps) {
         );
       });
       const t = sumTotals(priced, b.freightCents);
+      const ownerId = await resolveProposalOwner(c, a, b.ownerId);
       const number = await nextCounter(c, a.tenantId, 'proposal');
       const p = (
         await c.query(
           `INSERT INTO proposals (tenant_id, number, lead_id, subtotal_cents, discount_cents, tax_cents, freight_cents, total_cents,
-                                  payment_terms, valid_until, notes, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-          [a.tenantId, number, b.leadId, t.subtotalCents, t.discountCents, t.taxCents, t.freightCents, t.totalCents, b.paymentTerms, b.validUntil ?? null, b.notes, a.userId],
+                                  payment_terms, valid_until, notes, created_by, owner_id, temperature, expected_close_date)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+          [a.tenantId, number, b.leadId, t.subtotalCents, t.discountCents, t.taxCents, t.freightCents, t.totalCents, b.paymentTerms, b.validUntil ?? null, b.notes, a.userId,
+            ownerId, b.temperature ?? null, b.expectedCloseDate ?? null],
         )
       ).rows[0];
       for (const [i, it] of priced.entries()) {
@@ -171,7 +206,9 @@ export async function proposalRoutes(app: FastifyInstance, deps: Deps) {
     return db.withAuth(a, async (c) => {
       const p = await loadVisibleProposal(c, a, id);
       const items = (await c.query('SELECT * FROM proposal_items WHERE proposal_id = $1 ORDER BY position', [id])).rows;
-      return { ...p, items };
+      const owner = p.owner_id ? (await c.query('SELECT name FROM users WHERE id = $1', [p.owner_id])).rows[0]?.name ?? null : null;
+      const { share_token: _t, ...rest } = p;
+      return { ...rest, owner_name: owner, items };
     });
   });
 
@@ -189,6 +226,29 @@ export async function proposalRoutes(app: FastifyInstance, deps: Deps) {
       return r.rows[0];
     });
   }
+
+  /** Responsável, temperatura e previsão de fechamento (não mexe em valores). */
+  app.patch('/proposals/:id', { preHandler: guard(deps) }, async (req) => {
+    const a = authOf(req);
+    const { id } = params(idParam, req);
+    const b = proposalPatch.parse(req.body);
+    return db.withAuth(a, async (c) => {
+      const p = await loadVisibleProposal(c, a, id, true);
+      const ownerId = b.ownerId === undefined ? undefined : await resolveProposalOwner(c, a, b.ownerId);
+      if (ownerId !== undefined && ownerId !== p.owner_id && !atLeast(a.role, 'manager') && p.owner_id && p.owner_id !== a.userId) {
+        throw forbidden('Só gerentes trocam o responsável de propostas de outra pessoa');
+      }
+      const r = await c.query(
+        `UPDATE proposals SET owner_id = coalesce($2, owner_id),
+                temperature = CASE WHEN $3::boolean THEN $4 ELSE temperature END,
+                expected_close_date = CASE WHEN $5::boolean THEN $6::date ELSE expected_close_date END
+          WHERE id = $1 RETURNING id, owner_id, temperature, expected_close_date`,
+        [id, ownerId ?? null, b.temperature !== undefined, b.temperature ?? null, b.expectedCloseDate !== undefined, b.expectedCloseDate ?? null],
+      );
+      await audit(c, { tenantId: a.tenantId, actorType: 'user', actorId: a.userId, action: 'proposal.updated', targetType: 'proposal', targetId: id, metadata: b, ip: req.ip });
+      return r.rows[0];
+    });
+  });
 
   app.post('/proposals/:id/send', { preHandler: guard(deps) }, (req) => transition(req, 'draft', 'sent'));
   app.post('/proposals/:id/reject', { preHandler: guard(deps) }, (req) => transition(req, 'sent', 'rejected'));

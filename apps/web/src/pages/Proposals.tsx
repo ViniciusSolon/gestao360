@@ -1,26 +1,67 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { api, ApiError, brl, dateBR, toCents, useApi, useIdempotencyKey, useSubmit } from '../lib/api';
+import { api, ApiError, brl, can, dateBR, formatCnpj, PROPOSAL_STATUS, TEMPERATURE, TEMPERATURE_ICON, toCents, useApi, useIdempotencyKey, useSubmit } from '../lib/api';
+import { useSession } from '../lib/session';
+
+function Temp({ t }: { t: string | null }) {
+  if (!t) return <span className="muted">—</span>;
+  return <span className={`temp temp-${t}`}><span aria-hidden>{TEMPERATURE_ICON[t]}</span> {TEMPERATURE[t]}</span>;
+}
 
 export function Proposals() {
-  const { data } = useApi<any[]>('/proposals');
+  const { me } = useSession();
+  const [status, setStatus] = useState('');
+  const [owner, setOwner] = useState('');
+  const [temp, setTemp] = useState('');
+  const [q, setQ] = useState('');
+  const [qDebounced, setQDebounced] = useState('');
+  useEffect(() => { const t = setTimeout(() => setQDebounced(q.trim()), 250); return () => clearTimeout(t); }, [q]);
+  const qs = new URLSearchParams(Object.entries({ status, ownerId: owner, temperature: temp, q: qDebounced }).filter(([, v]) => v)).toString();
+  const { data, loading } = useApi<any[]>(`/proposals${qs ? `?${qs}` : ''}`);
+  const users = useApi<any[]>('/users');
+  const isMgr = can(me.user.role, 'manager');
+  const total = (data ?? []).reduce((a, p) => a + Number(p.total_cents), 0);
   return (
     <div>
       <div className="row between"><h1>Propostas</h1><Link to="/app/propostas/nova"><button>Nova proposta</button></Link></div>
-      <table>
-        <thead><tr><th>Nº</th><th>Cliente</th><th>Status</th><th>Data</th><th className="num">Total</th></tr></thead>
-        <tbody>
-          {(data ?? []).map((p) => (
-            <tr key={p.id}>
-              <td><Link to={`/app/propostas/${p.id}`}>#{p.number}</Link></td>
-              <td>{p.lead_name}{p.company ? ` — ${p.company}` : ''}</td>
-              <td><span className={`badge ${p.status}`}>{p.status}</span></td>
-              <td>{dateBR(p.created_at)}</td>
-              <td className="num">{brl(p.total_cents)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="filters-bar">
+        <input type="search" placeholder="Cliente, empresa ou CNPJ" aria-label="Buscar por cliente, empresa ou CNPJ" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select aria-label="Situação" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="">Todas as situações</option>
+          {Object.entries(PROPOSAL_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        {isMgr && (
+          <select aria-label="Responsável" value={owner} onChange={(e) => setOwner(e.target.value)}>
+            <option value="">Todos os responsáveis</option>
+            {users.data?.filter((u) => u.status !== 'inactive').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        )}
+        <select aria-label="Temperatura" value={temp} onChange={(e) => setTemp(e.target.value)}>
+          <option value="">Todas as temperaturas</option>
+          {Object.entries(TEMPERATURE).map(([k, v]) => <option key={k} value={k}>{TEMPERATURE_ICON[k]} {v}</option>)}
+        </select>
+        <span className="muted filters-sum">{loading ? 'Carregando…' : `${data?.length ?? 0} proposta(s) · ${brl(total)}`}</span>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead><tr><th>Nº</th><th>Cliente</th><th>Responsável</th><th>Situação</th><th>Temperatura</th><th>Previsão de fechamento</th><th>Criada em</th><th className="num">Total</th></tr></thead>
+          <tbody>
+            {(data ?? []).map((p) => (
+              <tr key={p.id}>
+                <td><Link to={`/app/propostas/${p.id}`}>#{p.number}</Link></td>
+                <td>{p.lead_name}{p.company ? ` — ${p.company}` : ''}{p.cnpj && <small className="muted cell-sub">CNPJ {formatCnpj(p.cnpj)}</small>}</td>
+                <td>{p.owner_name ?? '—'}</td>
+                <td><span className={`badge ${p.status}`}>{PROPOSAL_STATUS[p.status] ?? p.status}</span></td>
+                <td><Temp t={p.temperature} /></td>
+                <td>{dateBR(p.expected_close_date)}</td>
+                <td>{dateBR(p.created_at)}</td>
+                <td className="num">{brl(p.total_cents)}</td>
+              </tr>
+            ))}
+            {data && !data.length && <tr><td colSpan={8} className="muted">Nenhuma proposta com estes filtros.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -37,6 +78,11 @@ export function ProposalNew() {
   const [freight, setFreight] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('');
   const [validUntil, setValidUntil] = useState('');
+  const [expectedClose, setExpectedClose] = useState('');
+  const [temperature, setTemperature] = useState('');
+  const { me } = useSession();
+  const [ownerId, setOwnerId] = useState(me.user.id);
+  const users = useApi<any[]>('/users');
   const idem = useIdempotencyKey();
 
   // Prévia apenas visual. O total oficial é recalculado no servidor com os preços do cadastro.
@@ -62,6 +108,9 @@ export function ProposalNew() {
         freightCents: freight ? toCents(freight) : 0,
         paymentTerms: paymentTerms || null,
         validUntil: validUntil || null,
+        expectedCloseDate: expectedClose || null,
+        temperature: temperature || null,
+        ownerId,
       },
     });
     idem.renew();
@@ -98,6 +147,18 @@ export function ProposalNew() {
         <label>Frete (R$)<input inputMode="decimal" value={freight} onChange={(e) => setFreight(e.target.value)} /></label>
         <label>Condições de pagamento<input value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} placeholder="Ex.: 30/60/90 dias" /></label>
         <label>Validade<input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></label>
+        <label>Previsão de fechamento<input type="date" value={expectedClose} onChange={(e) => setExpectedClose(e.target.value)} /></label>
+        <label>Temperatura
+          <select value={temperature} onChange={(e) => setTemperature(e.target.value)}>
+            <option value="">Não definida</option>
+            {Object.entries(TEMPERATURE).map(([k, v]) => <option key={k} value={k}>{TEMPERATURE_ICON[k]} {v}</option>)}
+          </select>
+        </label>
+        <label>Responsável
+          <select value={ownerId} disabled={!can(me.user.role, 'manager')} onChange={(e) => setOwnerId(e.target.value)}>
+            {(users.data ?? [{ id: me.user.id, name: me.user.name }]).filter((u) => u.status !== 'inactive').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        </label>
       </div>
       <div className="muted">Prévia: {brl(Math.round(preview))} (o valor final é calculado pelo servidor)</div>
       {submit.error && <div className="error">{submit.error}</div>}
@@ -118,7 +179,7 @@ export function ProposalView() {
   return (
     <div className="stack">
       <div className="row between">
-        <h1>Proposta #{p.number} <span className={`badge ${p.status}`}>{p.status}</span></h1>
+        <h1>Proposta #{p.number} <span className={`badge ${p.status}`}>{PROPOSAL_STATUS[p.status] ?? p.status}</span></h1>
         <div className="prop-actions">
           <div className="row">
             <a href={`/api/proposals/${p.id}/pdf`} target="_blank" rel="noopener"><button className="secondary">PDF</button></a>
@@ -130,6 +191,7 @@ export function ProposalView() {
       </div>
       {act.error && <div className="error">{act.error}</div>}
       <div><Link to={`/app/leads/${p.lead_id}`}>Ver lead</Link></div>
+      <ProposalMeta proposal={p} onSaved={reload} />
       <table>
         <thead><tr><th>Item</th><th className="num">Qtd.</th><th className="num">Unitário</th><th className="num">Desc.</th><th className="num">Total</th></tr></thead>
         <tbody>{p.items.map((i: any) => <tr key={i.id}><td>{i.description}</td><td className="num">{Number(i.quantity)}</td><td className="num">{brl(i.unit_price_cents)}</td><td className="num">{i.discount_bp / 100}%</td><td className="num">{brl(i.total_cents)}</td></tr>)}</tbody>
@@ -234,6 +296,44 @@ function EmailDialog({ proposal, onClose, onSent }: { proposal: any; onClose: ()
           <button type="button" className="secondary" onClick={onClose}>Cancelar</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+/** Responsável, temperatura e previsão de fechamento (editáveis; não mexem em valores). */
+function ProposalMeta({ proposal: p, onSaved }: { proposal: any; onSaved: () => void }) {
+  const { me } = useSession();
+  const users = useApi<any[]>('/users');
+  const save = useSubmit(async (body: Record<string, unknown>) => {
+    await api(`/proposals/${p.id}`, { method: 'PATCH', body });
+    onSaved();
+  });
+  const open = p.status === 'draft' || p.status === 'sent';
+  return (
+    <div className="card form-grid prop-meta">
+      <label>Responsável
+        <select value={p.owner_id ?? ''} disabled={save.busy || !can(me.user.role, 'manager')} onChange={(e) => save.run({ ownerId: e.target.value })}>
+          {!p.owner_id && <option value="">—</option>}
+          {(users.data ?? (p.owner_id ? [{ id: p.owner_id, name: p.owner_name }] : [])).filter((u: any) => u.status !== 'inactive' || u.id === p.owner_id).map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+      </label>
+      <fieldset>
+        <legend>Temperatura</legend>
+        <div className="temp-pick" role="radiogroup" aria-label="Temperatura">
+          {Object.entries(TEMPERATURE).map(([k, v]) => (
+            <button key={k} type="button" role="radio" aria-checked={p.temperature === k} disabled={save.busy || !open}
+              className={`temp temp-${k} ${p.temperature === k ? 'on' : ''}`}
+              onClick={() => save.run({ temperature: p.temperature === k ? null : k })}>
+              <span aria-hidden>{TEMPERATURE_ICON[k]}</span> {v}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <label>Previsão de fechamento
+        <input type="date" value={p.expected_close_date?.slice(0, 10) ?? ''} disabled={save.busy || !open}
+          onChange={(e) => save.run({ expectedCloseDate: e.target.value || null })} />
+      </label>
+      {save.error && <div className="error" style={{ gridColumn: '1 / -1' }}>{save.error}</div>}
     </div>
   );
 }

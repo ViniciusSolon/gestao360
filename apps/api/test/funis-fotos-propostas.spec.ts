@@ -308,3 +308,37 @@ describe('Enviar proposta por WhatsApp e e-mail', () => {
     expect((await t.app.inject({ method: 'GET', url: `/api/public/propostas/${tok}` })).statusCode).toBe(404);
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('Indicadores comerciais filtrados por funil', () => {
+  it('quando escolhe um funil, então KPIs, funil e fontes contam só os leads dele', async () => {
+    const s = await signup(t.app);
+    const [principal] = await pipelines(s);
+    const pv = (await call(t.app, s, 'POST', '/api/pipelines', { name: 'Pós-venda' })).json() as Pipe;
+    await createLead(t.app, s, { name: 'A', channel: 'indicacao', valueCents: 100000 });
+    await createLead(t.app, s, { name: 'B', channel: 'google_ads', valueCents: 200000 });
+    const c = await createLead(t.app, s, { name: 'C', channel: 'direto', valueCents: 300000, stageId: pv.stages[0].id });
+    await call(t.app, s, 'POST', `/api/leads/${c.id}/move`, { stageId: pv.stages.find((x) => x.kind === 'won')!.id });
+
+    const all = (await call(t.app, s, 'GET', '/api/dashboard')).json();
+    expect(all.kpis.leads.value).toBe(3);
+    expect(new Set(all.funnel.map((f: any) => f.pipeline))).toEqual(new Set(['Funil comercial', 'Pós-venda']));
+
+    const onlyPv = (await call(t.app, s, 'GET', `/api/dashboard?pipelineId=${pv.id}`)).json();
+    expect([onlyPv.kpis.leads.value, onlyPv.kpis.wonCount.value, onlyPv.kpis.wonValueCents.value]).toEqual([1, 1, 300000]);
+    expect(onlyPv.funnel.every((f: any) => f.pipeline === 'Pós-venda')).toBe(true);
+    expect(onlyPv.byChannel.map((x: any) => x.channel)).toEqual(['direto']);
+
+    const onlyMain = (await call(t.app, s, 'GET', `/api/dashboard?pipelineId=${principal.id}`)).json();
+    expect([onlyMain.kpis.leads.value, onlyMain.kpis.wonCount.value]).toEqual([2, 0]);
+    expect(onlyMain.byChannel.map((x: any) => x.channel).sort()).toEqual(['google_ads', 'indicacao']);
+  });
+
+  it('quando o funil é de outra empresa ou não existe, então 404', async () => {
+    const a = await signup(t.app);
+    const b = await signup(t.app);
+    const [pa] = await pipelines(a);
+    expect((await call(t.app, b, 'GET', `/api/dashboard?pipelineId=${pa.id}`)).statusCode).toBe(404);
+    expect((await call(t.app, b, 'GET', `/api/dashboard?pipelineId=${randomUUID()}`)).statusCode).toBe(404);
+  });
+});

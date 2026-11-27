@@ -3,11 +3,13 @@ import { z } from 'zod';
 import type { Deps } from '../deps.js';
 import { authOf } from '../auth/guards.js';
 import { atLeast } from '../auth/roles.js';
+import { notFound } from '../lib/errors.js';
 import { guard } from './common.js';
 
 const query = z.object({
   from: z.string().date().optional(),
   to: z.string().date().optional(),
+  pipelineId: z.string().uuid().optional(),
 });
 
 /**
@@ -21,10 +23,15 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const to = q.to ? new Date(`${q.to}T23:59:59.999Z`) : new Date();
     const from = q.from ? new Date(`${q.from}T00:00:00Z`) : new Date(to.getTime() - 30 * 24 * 3600 * 1000);
     const mine = !atLeast(a.role, 'manager');
-    const scope = mine ? 'AND l.owner_id = $3' : 'AND $3::uuid IS NULL';
-    const p = [from, to, mine ? a.userId : null];
+    // Filtro de funil: só leads cujas etapas pertencem ao funil escolhido
+    const inPipe = (n: number) => `AND ($${n}::uuid IS NULL OR l.stage_id IN (SELECT id FROM pipeline_stages WHERE pipeline_id = $${n}))`;
+    const scope = `${mine ? 'AND l.owner_id = $3' : 'AND $3::uuid IS NULL'} ${inPipe(4)}`;
+    const p = [from, to, mine ? a.userId : null, q.pipelineId ?? null];
 
     return deps.db.withAuth(a, async (c) => {
+      if (q.pipelineId && !(await c.query('SELECT 1 FROM pipelines WHERE id = $1', [q.pipelineId])).rowCount) {
+        throw notFound('Funil não encontrado');
+      }
       const kpi = (
         await c.query(
           `SELECT
@@ -59,8 +66,9 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
            FROM pipeline_stages s
            JOIN pipelines pl ON pl.id = s.pipeline_id
            LEFT JOIN leads l ON l.stage_id = s.id ${mine ? 'AND l.owner_id = $1' : 'AND $1::uuid IS NULL'}
+          WHERE ($2::uuid IS NULL OR pl.id = $2)
           GROUP BY s.id, pl.id ORDER BY pl.position, pl.created_at, s.position`,
-        [mine ? a.userId : null],
+        [mine ? a.userId : null, q.pipelineId ?? null],
       );
       const forecast = funnel.rows
         .filter((s) => s.kind === 'open')
@@ -68,9 +76,10 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       const alerts = (
         await c.query(
           `SELECT
-             (SELECT count(*) FROM leads l WHERE l.status = 'open' AND l.updated_at < now() - interval '14 days' ${mine ? 'AND l.owner_id = $1' : 'AND $1::uuid IS NULL'}) AS stalled,
-             (SELECT count(*) FROM activities act WHERE act.done_at IS NULL AND act.due_at < now() ${mine ? 'AND act.assigned_to = $1' : ''}) AS overdue`,
-          [mine ? a.userId : null],
+             (SELECT count(*) FROM leads l WHERE l.status = 'open' AND l.updated_at < now() - interval '14 days' ${mine ? 'AND l.owner_id = $1' : 'AND $1::uuid IS NULL'} ${inPipe(2)}) AS stalled,
+             (SELECT count(*) FROM activities act WHERE act.done_at IS NULL AND act.due_at < now() ${mine ? 'AND act.assigned_to = $1' : 'AND $1::uuid IS NULL'}
+                AND ($2::uuid IS NULL OR act.lead_id IN (SELECT l.id FROM leads l WHERE true ${inPipe(2)}))) AS overdue`,
+          [mine ? a.userId : null, q.pipelineId ?? null],
         )
       ).rows[0];
 
@@ -78,7 +87,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       const lost = Number(kpi.lost);
       const wonValue = Number(kpi.won_value);
       return {
-        period: { from, to, scope: mine ? 'meus leads' : 'empresa' },
+        period: { from, to, scope: mine ? 'meus leads' : 'empresa', pipelineId: q.pipelineId ?? null },
         kpis: {
           leads: { value: Number(kpi.leads), origin: 'Leads criados no período' },
           mqls: { value: Number(kpi.mqls), origin: 'Leads do período com pontuação ≥ 50' },

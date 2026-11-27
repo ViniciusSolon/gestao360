@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useSession } from '../lib/session';
+import { usePipelines } from '../lib/pipelines';
 import { api, brl, CHANNELS, dateBR, dateTimeBR, formatCnpj, maskCnpj, useApi, useSubmit } from '../lib/api';
 
 const EVENT_LABEL: Record<string, string> = {
@@ -48,6 +50,35 @@ function CnpjField({ leadId, value, onSaved }: { leadId: string; value: string |
   );
 }
 
+/** Funil e etapa do lead: dá para mudar de etapa ou levar o lead para outro funil. */
+function StageField({ leadId, stageId, onSaved }: { leadId: string; stageId: string; onSaved: () => void }) {
+  const { me } = useSession();
+  const { data } = usePipelines(me.tenant.id);
+  const move = useSubmit(async (to: string) => {
+    const stage = data?.flatMap((p) => p.stages).find((s) => s.id === to);
+    let lostReason: string | undefined;
+    if (stage?.kind === 'lost') {
+      lostReason = prompt('Motivo da perda:') ?? undefined;
+      if (!lostReason) return;
+    }
+    await api(`/leads/${leadId}/move`, { method: 'POST', body: { stageId: to, lostReason } });
+    onSaved();
+  });
+  return (
+    <label>
+      <span className="muted">Funil e etapa</span>
+      <select value={stageId} disabled={move.busy || !data} onChange={(e) => move.run(e.target.value)}>
+        {data?.map((p) => (
+          <optgroup key={p.id} label={p.name}>
+            {p.stages.map((s) => <option key={s.id} value={s.id}>{p.name} › {s.name}</option>)}
+          </optgroup>
+        ))}
+      </select>
+      {move.error && <span className="error">{move.error}</span>}
+    </label>
+  );
+}
+
 export function LeadDetail() {
   const { id } = useParams();
   const { data: lead, error, reload } = useApi<any>(`/leads/${id}`);
@@ -70,6 +101,7 @@ export function LeadDetail() {
         <Link to={`/app/propostas/nova?leadId=${lead.id}`}><button>Nova proposta</button></Link>
       </div>
       <div className="card form-grid">
+        <StageField leadId={lead.id} stageId={lead.stage_id} onSaved={reload} />
         <div><div className="muted">Empresa</div>{lead.company ?? '—'}</div>
         <CnpjField leadId={lead.id} value={lead.cnpj} onSaved={reload} />
         <div><div className="muted">E-mail</div>{lead.email ?? '—'}</div>

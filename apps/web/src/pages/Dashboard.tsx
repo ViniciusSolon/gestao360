@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { brl, CHANNELS, useApi } from '../lib/api';
+import { useSession } from '../lib/session';
+import { usePipelines } from '../lib/pipelines';
 
 interface Kpi { value: number; origin: string }
 interface Dash {
@@ -16,7 +18,10 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 export function Dashboard() {
   const [from, setFrom] = useState(iso(new Date(Date.now() - 30 * 86400000)));
   const [to, setTo] = useState(iso(new Date()));
-  const { data, error } = useApi<Dash>(`/dashboard?from=${from}&to=${to}`);
+  const { me } = useSession();
+  const pipes = usePipelines(me.tenant.id);
+  const [pipelineId, setPipelineId] = useState('');
+  const { data, error } = useApi<Dash>(`/dashboard?from=${from}&to=${to}${pipelineId ? `&pipelineId=${pipelineId}` : ''}`);
   if (error) return <div className="error">{error.message}</div>;
   if (!data) return <div className="muted">Carregando…</div>;
   const k = data.kpis;
@@ -36,8 +41,12 @@ export function Dashboard() {
       <div className="row between">
         <h1>Comercial <span className="muted" style={{ fontSize: '.9rem' }}>({data.period.scope})</span></h1>
         <div className="row">
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
+          <select aria-label="Funil" value={pipelineId} onChange={(e) => setPipelineId(e.target.value)} style={{ width: 'auto', minWidth: 190 }}>
+            <option value="">Todos os funis</option>
+            {pipes.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <input type="date" aria-label="De" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
+          <input type="date" aria-label="Até" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
         </div>
       </div>
       {(data.alerts.stalledLeads > 0 || data.alerts.overdueActivities > 0) && (
@@ -54,7 +63,7 @@ export function Dashboard() {
           </div>
         ))}
       </div>
-      <h2>Funil atual</h2>
+      <h2>Funil atual{pipelineId && pipes.data ? ` · ${pipes.data.find((p) => p.id === pipelineId)?.name ?? ''}` : ''}</h2>
       <div className="card stack">
         {data.funnel.map((f, i) => (
           <div key={f.stageId} className="stack" style={{ gap: '.4rem' }}>

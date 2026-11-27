@@ -6,7 +6,7 @@ import { SessionProvider } from './lib/session';
 import { AuthPage } from './pages/Auth';
 import { AcceptInvite } from './pages/AcceptInvite';
 import { AppLayout } from './pages/Layout';
-import { Kanban } from './pages/Kanban';
+import { Kanban, KanbanIndex } from './pages/Kanban';
 import { LeadDetail } from './pages/LeadDetail';
 import { Activities } from './pages/Activities';
 import { Products } from './pages/Products';
@@ -43,7 +43,8 @@ createRoot(document.getElementById('root')!).render(
           <Route path="marketing/campanhas/:id" element={<CampaignView />} />
           <Route path="marketing/campanhas/:id/editar" element={<CampaignEditor />} />
           <Route path="marketing/canais" element={<Channels />} />
-          <Route path="funil" element={<Kanban />} />
+          <Route path="funil" element={<KanbanIndex />} />
+          <Route path="funil/:pipelineId" element={<Kanban />} />
           <Route path="leads/:id" element={<LeadDetail />} />
           <Route path="agenda" element={<Activities />} />
           <Route path="produtos" element={<Products />} />

@@ -331,3 +331,7 @@ a.secondary-link { display: inline-block; padding: .5rem .9rem; border-radius: 8
 @media (max-width: 760px) { .uf-personal { grid-template-columns: 1fr; } .uf-avatar { order: -1; } .btn-new { margin-left: 0; } }
 .prod-search { margin-bottom: .75rem; } .prod-search input { max-width: 360px; }
 button.sm, a.btn { white-space: nowrap; }
+.nav-add { all: unset; cursor: pointer; padding: .4rem .6rem; border-radius: 8px; font-size: .88rem; color: var(--primary); font-weight: 600; }
+.nav-add:hover { background: var(--bg); }
+.nav-add:focus-visible { outline: 2px solid var(--primary); }
+.kanban-head { margin-bottom: 1rem; align-items: flex-end; }

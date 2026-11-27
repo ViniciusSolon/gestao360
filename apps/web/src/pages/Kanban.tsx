@@ -1,24 +1,38 @@
-import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { api, brl, can, formatCnpj, LEGACY_SOURCES, SOURCES, maskCnpj, toCents, useApi, useSubmit } from '../lib/api';
 import { useSession } from '../lib/session';
+import { createPipelineInteractive, usePipelines, type Pipeline, type Stage } from '../lib/pipelines';
 
-interface Stage { id: string; pipeline_id: string; name: string; kind: string; probability: number }
-interface Pipeline { id: string; name: string; stages: Stage[] }
 export interface Lead {
   id: string; name: string; company: string | null; cnpj: string | null; stage_id: string; status: string; score: number; is_mql: boolean;
   value_cents: string; owner_name: string | null; channel: string;
 }
 
-export function Kanban() {
+/** /app/funil abre o primeiro funil. */
+export function KanbanIndex() {
   const { me } = useSession();
-  const pipes = useApi<Pipeline[]>('/pipelines');
+  const { data } = usePipelines(me.tenant.id);
+  if (!data) return <div className="muted">Carregando…</div>;
+  if (!data.length) return <div className="muted">Nenhum funil.</div>;
+  return <Navigate to={`/app/funil/${data[0].id}`} replace />;
+}
+
+/** Um funil por tela (cada funil fica no menu, embaixo de "Funil (Kanban)"). */
+export function Kanban() {
+  const { pipelineId } = useParams();
+  const { me } = useSession();
+  const nav = useNavigate();
+  const pipes = usePipelines(me.tenant.id);
   const leads = useApi<Lead[]>('/leads');
   const [over, setOver] = useState<string | null>(null);
-  const [creatingIn, setCreatingIn] = useState<Pipeline | null>(null);
+  const [creating, setCreating] = useState(false);
   const [q, setQ] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const isAdmin = can(me.user.role, 'admin');
+  const all = pipes.data ?? [];
+  const p = all.find((x) => x.id === pipelineId);
+  useEffect(() => { setErr(null); setQ(''); setCreating(false); }, [pipelineId]);
 
   const move = async (leadId: string, stage: Stage) => {
     const lead = leads.data?.find((l) => l.id === leadId);
@@ -44,18 +58,22 @@ export function Kanban() {
     await fn();
     await pipes.reload();
   });
-  const newPipeline = () => {
-    const name = prompt('Nome do novo funil (ex.: Pós-venda, Parcerias):')?.trim();
-    if (name) admin.run(() => api('/pipelines', { method: 'POST', body: { name } }));
-  };
-  const renamePipeline = (p: Pipeline) => {
+
+  if (!pipes.data) return <div className="muted">Carregando…</div>;
+  if (!p) return <div className="center">Funil não encontrado. <Link to="/app/funil">Ver funis</Link></div>;
+
+  const renamePipeline = () => {
     const name = prompt('Novo nome do funil:', p.name)?.trim();
     if (name && name !== p.name) admin.run(() => api(`/pipelines/${p.id}`, { method: 'PATCH', body: { name } }));
   };
-  const deletePipeline = (p: Pipeline) => {
-    if (confirm(`Excluir o funil "${p.name}" e as etapas dele? (só funciona se não houver leads nele)`)) admin.run(() => api(`/pipelines/${p.id}`, { method: 'DELETE' }));
+  const deletePipeline = () => {
+    if (!confirm(`Excluir o funil "${p.name}" e as etapas dele? (só funciona se não houver leads nele)`)) return;
+    admin.run(async () => {
+      await api(`/pipelines/${p.id}`, { method: 'DELETE' });
+      nav('/app/funil', { replace: true });
+    });
   };
-  const newStage = (p: Pipeline) => {
+  const newStage = () => {
     const name = prompt(`Nome da nova etapa em "${p.name}":`)?.trim();
     if (!name) return;
     const probability = Number(prompt('Probabilidade de fechamento (0-100):', '50'));
@@ -68,91 +86,83 @@ export function Kanban() {
 
   // Busca por nome, empresa ou CNPJ (com ou sem máscara)
   const qCnpj = q.toUpperCase().replace(/[^0-9A-Z]/g, '');
-  const visible = (leads.data ?? []).filter(
+  const stageIds = new Set(p.stages.map((s) => s.id));
+  const inPipe = (leads.data ?? []).filter((l) => stageIds.has(l.stage_id));
+  const visible = inPipe.filter(
     (l) =>
       !q ||
       `${l.name} ${l.company ?? ''}`.toLowerCase().includes(q.toLowerCase()) ||
       (qCnpj.length >= 3 && !!l.cnpj?.includes(qCnpj)),
   );
-  const all = pipes.data ?? [];
 
   return (
     <div>
-      <div className="row between">
-        <h1>Funil comercial</h1>
+      <div className="row between kanban-head">
+        <div>
+          <h1 style={{ marginBottom: '.2rem' }}>{p.name}</h1>
+          <small className="muted">{inPipe.length} lead(s) · {brl(inPipe.reduce((a, l) => a + Number(l.value_cents), 0))}</small>
+        </div>
         <div className="row">
           <input placeholder="Nome, empresa ou CNPJ" aria-label="Buscar por nome, empresa ou CNPJ" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
-          <button onClick={() => all[0] && setCreatingIn(all[0])}>+ Novo lead</button>
+          <button onClick={() => setCreating(true)} disabled={!p.stages.some((s) => s.kind === 'open')}>+ Novo lead</button>
+          {isAdmin && <>
+            <button className="secondary" disabled={admin.busy} onClick={newStage}>+ Etapa</button>
+            <button className="secondary" disabled={admin.busy} onClick={renamePipeline}>Renomear</button>
+            {all.length > 1 && <button className="secondary" disabled={admin.busy} onClick={deletePipeline}>Excluir funil</button>}
+          </>}
         </div>
       </div>
       {(err || admin.error) && <div className="error" role="alert">{err ?? admin.error}</div>}
-      {all.map((p) => {
-        const firstOpen = p.stages.find((s) => s.kind === 'open');
-        return (
-          <section key={p.id} className="pipeline" aria-labelledby={`pl-${p.id}`}>
-            {(all.length > 1 || isAdmin) && (
-              <div className="pipeline-head">
-                <h2 id={`pl-${p.id}`}>{p.name}</h2>
-                <div className="row">
-                  {all.length > 1 && firstOpen && <button className="secondary sm" onClick={() => setCreatingIn(p)}>+ Lead aqui</button>}
-                  {isAdmin && <>
-                    <button className="secondary sm" disabled={admin.busy} onClick={() => newStage(p)}>+ Etapa</button>
-                    <button className="secondary sm" disabled={admin.busy} onClick={() => renamePipeline(p)}>Renomear</button>
-                    {all.length > 1 && <button className="secondary sm" disabled={admin.busy} onClick={() => deletePipeline(p)}>Excluir funil</button>}
-                  </>}
-                </div>
-              </div>
-            )}
-            <div className="kanban">
-              {p.stages.map((s) => {
-                const items = visible.filter((l) => l.stage_id === s.id);
-                const total = items.reduce((a, l) => a + Number(l.value_cents), 0);
-                const allInStage = (leads.data ?? []).filter((l) => l.stage_id === s.id).length;
-                return (
-                  <div
-                    key={s.id}
-                    className={`col ${over === s.id ? 'over' : ''}`}
-                    onDragOver={(e) => { e.preventDefault(); setOver(s.id); }}
-                    onDragLeave={() => setOver(null)}
-                    onDrop={(e) => { setOver(null); move(e.dataTransfer.getData('text/lead'), s); }}
-                  >
-                    <h3>
-                      <span>{s.name} <span className="muted">({items.length})</span></span>
-                      <span className="col-tools">
-                        <span className="muted">{brl(total)}</span>
-                        {isAdmin && (
-                          <button type="button" className="icon-btn" aria-label={`Excluir etapa ${s.name}`} title="Excluir etapa"
-                            disabled={admin.busy} onClick={() => deleteStage(s, allInStage)}>×</button>
-                        )}
-                      </span>
-                    </h3>
-                    {items.map((l) => (
-                      <div key={l.id} className="lead" draggable onDragStart={(e) => e.dataTransfer.setData('text/lead', l.id)}>
-                        <Link to={`/app/leads/${l.id}`} className="t">{l.name}</Link>
-                        <div className="s">{l.company ?? '—'} · {brl(l.value_cents)}</div>
-                        {l.cnpj && <div className="s cnpj">CNPJ {formatCnpj(l.cnpj)}</div>}
-                        <div className="s row">
-                          <span>Score {l.score}</span>{l.is_mql && <span className="badge">MQL</span>}<span>{l.owner_name ?? 'sem responsável'}</span>
-                        </div>
-                        <Link to={`/app/leads/${l.id}`} className="lead-open" aria-label={`Abrir ${l.name}`} draggable={false}>Abrir →</Link>
-                      </div>
-                    ))}
+      <div className="kanban">
+        {p.stages.map((s) => {
+          const items = visible.filter((l) => l.stage_id === s.id);
+          const total = items.reduce((a, l) => a + Number(l.value_cents), 0);
+          const allInStage = inPipe.filter((l) => l.stage_id === s.id).length;
+          return (
+            <div
+              key={s.id}
+              className={`col ${over === s.id ? 'over' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); setOver(s.id); }}
+              onDragLeave={() => setOver(null)}
+              onDrop={(e) => { setOver(null); move(e.dataTransfer.getData('text/lead'), s); }}
+            >
+              <h3>
+                <span>{s.name} <span className="muted">({items.length})</span></span>
+                <span className="col-tools">
+                  <span className="muted">{brl(total)}</span>
+                  {isAdmin && (
+                    <button type="button" className="icon-btn" aria-label={`Excluir etapa ${s.name}`} title="Excluir etapa"
+                      disabled={admin.busy} onClick={() => deleteStage(s, allInStage)}>×</button>
+                  )}
+                </span>
+              </h3>
+              {items.map((l) => (
+                <div key={l.id} className="lead" draggable onDragStart={(e) => e.dataTransfer.setData('text/lead', l.id)}>
+                  <Link to={`/app/leads/${l.id}`} className="t">{l.name}</Link>
+                  <div className="s">{l.company ?? '—'} · {brl(l.value_cents)}</div>
+                  {l.cnpj && <div className="s cnpj">CNPJ {formatCnpj(l.cnpj)}</div>}
+                  <div className="s row">
+                    <span>Score {l.score}</span>{l.is_mql && <span className="badge">MQL</span>}<span>{l.owner_name ?? 'sem responsável'}</span>
                   </div>
-                );
-              })}
+                  <Link to={`/app/leads/${l.id}`} className="lead-open" aria-label={`Abrir ${l.name}`} draggable={false}>Abrir →</Link>
+                </div>
+              ))}
             </div>
-          </section>
-        );
-      })}
+          );
+        })}
+      </div>
       {isAdmin && (
-        <button type="button" className="add-pipeline" disabled={admin.busy} onClick={newPipeline}>+ Novo funil</button>
+        <button type="button" className="add-pipeline" disabled={admin.busy}
+          onClick={() => admin.run(async () => { const np = await createPipelineInteractive(); if (np) nav(`/app/funil/${np.id}`); })}>
+          + Novo funil
+        </button>
       )}
-      {creatingIn && (
+      {creating && (
         <NewLead
           pipelines={all}
-          initial={creatingIn}
-          onClose={() => setCreatingIn(null)}
-          onCreated={() => { setCreatingIn(null); leads.reload(); }}
+          initial={p}
+          onClose={() => setCreating(false)}
+          onCreated={() => { setCreating(false); leads.reload(); }}
         />
       )}
     </div>

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { api, can, ROLE_LABEL } from '../lib/api';
 import { useSession } from '../lib/session';
+import { createPipelineInteractive, usePipelines } from '../lib/pipelines';
 
 /** Abas de Indicadores. A primeira é Marketing (gerente para cima). */
 export function indicatorTabs(role: Parameters<typeof can>[0]) {
@@ -21,7 +22,7 @@ export const marketingTabs = [
 export const orgTabs = [{ to: '/app/organizacao/usuarios', label: 'Usuários' }];
 
 /** Grupo expansível do menu: clicar abre as abas e já leva para a primeira. */
-function NavGroup({ id, label, base, tabs, alsoActive }: { id: string; label: string; base: string; tabs: { to: string; label: string }[]; alsoActive?: boolean }) {
+function NavGroup({ id, label, base, tabs, alsoActive, extra }: { id: string; label: string; base: string; tabs: { to: string; label: string }[]; alsoActive?: boolean; extra?: ReactNode }) {
   const nav = useNavigate();
   const { pathname } = useLocation();
   const inside = !!alsoActive || pathname.startsWith(base);
@@ -34,7 +35,7 @@ function NavGroup({ id, label, base, tabs, alsoActive }: { id: string; label: st
         aria-expanded={open}
         aria-controls={id}
         onClick={() => {
-          if (!open && !inside) nav(tabs[0].to);
+          if (!open && !inside && tabs[0]) nav(tabs[0].to);
           setOpen(!open || !inside);
         }}
       >
@@ -43,6 +44,7 @@ function NavGroup({ id, label, base, tabs, alsoActive }: { id: string; label: st
       {open && (
         <div className="nav-sub" id={id}>
           {tabs.map((t) => <NavLink key={t.to} to={t.to}>{t.label}</NavLink>)}
+          {extra}
         </div>
       )}
     </div>
@@ -53,6 +55,7 @@ export function AppLayout() {
   const { me } = useSession();
   const nav = useNavigate();
   const { pathname } = useLocation();
+  const pipelines = usePipelines(me.tenant.id);
 
   const logout = async () => {
     await api('/auth/logout', { method: 'POST' }).catch(() => {});
@@ -66,7 +69,15 @@ export function AppLayout() {
         <NavGroup id="nav-indicadores" label="Indicadores" base="/app/indicadores" alsoActive={pathname === '/app'} tabs={indicatorTabs(me.user.role)} />
         {can(me.user.role, 'manager') && <NavGroup id="nav-marketing" label="Marketing" base="/app/marketing" tabs={marketingTabs} />}
         {can(me.user.role, 'admin') && <NavGroup id="nav-org" label="Organização" base="/app/organizacao" tabs={orgTabs} />}
-        <NavLink to="/app/funil">Funil (Kanban)</NavLink>
+        <NavGroup
+          id="nav-funis" label="Funil (Kanban)" base="/app/funil"
+          tabs={(pipelines.data ?? []).map((p) => ({ to: `/app/funil/${p.id}`, label: p.name }))}
+          extra={can(me.user.role, 'admin') && (
+            <button type="button" className="nav-add" onClick={async () => {
+              try { const p = await createPipelineInteractive(); if (p) nav(`/app/funil/${p.id}`); } catch (e) { alert((e as Error).message); }
+            }}>+ Novo funil</button>
+          )}
+        />
         <NavLink to="/app/agenda">Agenda</NavLink>
         <NavLink to="/app/propostas">Propostas</NavLink>
         <NavLink to="/app/produtos">Produtos</NavLink>

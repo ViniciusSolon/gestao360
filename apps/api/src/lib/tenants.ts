@@ -3,6 +3,7 @@ import type { Client } from '../db/db.js';
 import { conflict, notFound, unprocessable } from './errors.js';
 import { newToken, sha256 } from './crypto.js';
 import { audit } from './limits.js';
+import { DEFAULT_PROFILES } from '../modules/users.js';
 import { enqueue } from '../jobs/queue.js';
 
 /** Etapas do funil criadas para toda empresa nova. */
@@ -91,6 +92,9 @@ export async function provisionTenant(c: Client, input: NewTenantInput, appPubli
     await c.query(`INSERT INTO pipeline_stages (tenant_id, pipeline_id, name, position, probability, kind) VALUES ($1, $2, $3, $4, $5, $6)`, [
       tenantId, pipelineId, name, i, prob, kind,
     ]);
+  }
+  for (const [name, role] of DEFAULT_PROFILES) {
+    await c.query('INSERT INTO user_profiles (tenant_id, name, role) VALUES ($1, $2, $3)', [tenantId, name, role]);
   }
   await audit(c, {
     tenantId, actorType: actorAdminId ? 'platform_admin' : 'system', actorId: actorAdminId,

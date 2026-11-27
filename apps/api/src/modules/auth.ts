@@ -13,6 +13,7 @@ import {
   tenantIsUsable,
 } from '../auth/guards.js';
 import { sessionOnly } from './common.js';
+import { applyInviteDetails } from './users.js';
 import type { Client } from '../db/db.js';
 
 const password = z.string().min(10, 'A senha precisa ter ao menos 10 caracteres').max(200);
@@ -119,6 +120,8 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
         `INSERT INTO users (tenant_id, name, email, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
         [inv.tenant_id, name, inv.email, pwHash, inv.role],
       );
+      // Cadastro feito pelo administrador no "Novo usuário" (perfil, departamento, squads…)
+      await applyInviteDetails(c, inv.tenant_id, u.rows[0].id, inv.invite_id);
       await audit(c, { tenantId: inv.tenant_id, actorType: 'user', actorId: u.rows[0].id, action: 'invite.accepted', targetId: inv.invite_id, ip: req.ip });
       return createSession(c, inv.tenant_id, u.rows[0].id);
     });

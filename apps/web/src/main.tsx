@@ -13,7 +13,7 @@ import { Products } from './pages/Products';
 import { Proposals, ProposalNew, ProposalView } from './pages/Proposals';
 import { Dashboard } from './pages/Dashboard';
 import { IndicadoresIndex, Marketing } from './pages/Marketing';
-import { Team } from './pages/Team';
+import { UserForm, Users } from './pages/Users';
 import { CampaignEditor, CampaignsHome, CampaignView, Unsubscribe } from './pages/Campaigns';
 import { Channels } from './pages/Channels';
 import { Billing, FakeCheckout } from './pages/Billing';
@@ -50,7 +50,11 @@ createRoot(document.getElementById('root')!).render(
           <Route path="propostas" element={<Proposals />} />
           <Route path="propostas/nova" element={<ProposalNew />} />
           <Route path="propostas/:id" element={<ProposalView />} />
-          <Route path="equipe" element={<Team />} />
+          <Route path="equipe" element={<Navigate to="/app/organizacao/usuarios" replace />} />
+          <Route path="organizacao" element={<Navigate to="/app/organizacao/usuarios" replace />} />
+          <Route path="organizacao/usuarios" element={<Users />} />
+          <Route path="organizacao/usuarios/novo" element={<UserForm />} />
+          <Route path="organizacao/usuarios/:id" element={<UserForm />} />
           <Route path="assinatura" element={<Billing />} />
           <Route path="assinatura/checkout-fake" element={<FakeCheckout />} />
         </Route>

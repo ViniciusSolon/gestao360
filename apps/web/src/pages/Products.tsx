@@ -85,6 +85,13 @@ export function Products() {
   });
   const toggle = async (p: Product) => { await api(`/products/${p.id}`, { method: 'PATCH', body: { active: !p.active } }); reload(); };
   const editable = can(me.user.role, 'manager');
+  const [q, setQ] = useState('');
+  // Busca por nome ou SKU (sem diferenciar maiúsculas, acentos nem traços do SKU)
+  const norm = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const nq = norm(q.trim());
+  const visible = (data ?? []).filter(
+    (p) => !nq || norm(p.name).includes(nq) || norm(p.sku).replace(/[^a-z0-9]/g, '').includes(nq.replace(/[^a-z0-9]/g, '') || nq),
+  );
 
   return (
     <div>
@@ -107,10 +114,14 @@ export function Products() {
           {submit.error && <div className="error">{submit.error}</div>}
         </form>
       )}
+      <div className="row between prod-search">
+        <input type="search" placeholder="Buscar por nome ou SKU" aria-label="Buscar produto por nome ou SKU" value={q} onChange={(e) => setQ(e.target.value)} />
+        {data && <span className="muted">{visible.length === data.length ? `${data.length} produtos` : `${visible.length} de ${data.length} produtos`}</span>}
+      </div>
       <table>
         <thead><tr><th>Foto</th><th>SKU</th><th>Produto</th><th>NCM</th><th className="num">Preço</th><th className="num">Tributos</th><th>Status</th></tr></thead>
         <tbody>
-          {(data ?? []).map((p) => (
+          {visible.map((p) => (
             <tr key={p.id}>
               <td><ProductPhoto p={p} editable={editable} onChanged={reload} /></td>
               <td>{p.sku}</td><td>{p.name}</td><td>{p.ncm ?? '—'}</td>
@@ -118,6 +129,7 @@ export function Products() {
               <td>{editable ? <button className="secondary" onClick={() => toggle(p)}>{p.active ? 'Ativo' : 'Inativo'}</button> : p.active ? 'Ativo' : 'Inativo'}</td>
             </tr>
           ))}
+          {data && !visible.length && <tr><td colSpan={7} className="muted">Nenhum produto encontrado para “{q}”.</td></tr>}
         </tbody>
       </table>
     </div>

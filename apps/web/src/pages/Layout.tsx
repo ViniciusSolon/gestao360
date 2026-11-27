@@ -17,6 +17,9 @@ export const marketingTabs = [
   { to: '/app/marketing/canais', label: 'Canais' },
 ];
 
+/** Abas de Organização (administrador para cima). */
+export const orgTabs = [{ to: '/app/organizacao/usuarios', label: 'Usuários' }];
+
 /** Grupo expansível do menu: clicar abre as abas e já leva para a primeira. */
 function NavGroup({ id, label, base, tabs, alsoActive }: { id: string; label: string; base: string; tabs: { to: string; label: string }[]; alsoActive?: boolean }) {
   const nav = useNavigate();
@@ -62,11 +65,11 @@ export function AppLayout() {
         <div className="tenant">{me.tenant.name} · {me.user.name} ({ROLE_LABEL[me.user.role]})</div>
         <NavGroup id="nav-indicadores" label="Indicadores" base="/app/indicadores" alsoActive={pathname === '/app'} tabs={indicatorTabs(me.user.role)} />
         {can(me.user.role, 'manager') && <NavGroup id="nav-marketing" label="Marketing" base="/app/marketing" tabs={marketingTabs} />}
+        {can(me.user.role, 'admin') && <NavGroup id="nav-org" label="Organização" base="/app/organizacao" tabs={orgTabs} />}
         <NavLink to="/app/funil">Funil (Kanban)</NavLink>
         <NavLink to="/app/agenda">Agenda</NavLink>
         <NavLink to="/app/propostas">Propostas</NavLink>
         <NavLink to="/app/produtos">Produtos</NavLink>
-        {can(me.user.role, 'admin') && <NavLink to="/app/equipe">Equipe</NavLink>}
         <NavLink to="/app/assinatura">Assinatura</NavLink>
         <div className="spacer" />
         <button className="secondary" onClick={logout}>Sair</button>

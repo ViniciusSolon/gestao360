@@ -71,16 +71,18 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
           GROUP BY s.id, pl.id ORDER BY pl.position, pl.created_at, s.position`,
         [mine ? a.userId : null, q.pipelineId ?? null],
       );
-      // Previsão de fechamento: propostas em aberto (rascunho/enviada) com previsão dentro do período
+      // Previsão de fechamento: propostas em aberto (rascunho/enviada) com fechamento previsto até o
+      // fim do mês atual, incluindo as atrasadas (previsão já passou e continuam em aberto)
       const fc = await c.query(
         `SELECT coalesce(sum(p.total_cents), 0) AS total, count(*) AS n,
                 coalesce(sum(p.total_cents) FILTER (WHERE p.temperature = 'hot'), 0)  AS hot,
                 coalesce(sum(p.total_cents) FILTER (WHERE p.temperature = 'warm'), 0) AS warm,
                 coalesce(sum(p.total_cents) FILTER (WHERE p.temperature = 'cold'), 0) AS cold
            FROM proposals p JOIN leads l ON l.id = p.lead_id
-          WHERE p.status IN ('draft','sent') AND p.expected_close_date BETWEEN $1::date AND $2::date
-            ${mine ? 'AND p.owner_id = $3' : 'AND $3::uuid IS NULL'} ${inPipe(4)}`,
-        [from.toISOString().slice(0, 10), to.toISOString().slice(0, 10), mine ? a.userId : null, q.pipelineId ?? null],
+          WHERE p.status IN ('draft','sent')
+            AND p.expected_close_date < (date_trunc('month', now()) + interval '1 month')::date
+            ${mine ? 'AND p.owner_id = $1' : 'AND $1::uuid IS NULL'} ${inPipe(2)}`,
+        [mine ? a.userId : null, q.pipelineId ?? null],
       );
       const forecast = Number(fc.rows[0].total);
       const alerts = (
@@ -106,7 +108,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
           avgTicketCents: { value: won ? Math.round(wonValue / won) : 0, origin: 'Valor ganho ÷ negócios ganhos' },
           conversionRate: { value: won + lost ? won / (won + lost) : 0, origin: 'Ganhos ÷ (ganhos + perdidos) fechados no período' },
           salesCycleDays: { value: kpi.cycle_days ? Number(Number(kpi.cycle_days).toFixed(1)) : 0, origin: 'Média de dias entre criação e ganho' },
-          forecastCents: { value: forecast, origin: 'Σ propostas em aberto com previsão de fechamento no período' },
+          forecastCents: { value: forecast, origin: 'Σ propostas em aberto com fechamento previsto até o fim do mês (inclui atrasadas)' },
         },
         revenueBySeller: bySeller.rows.map((r) => ({ seller: r.seller, won: Number(r.won), valueCents: Number(r.value_cents) })),
         byChannel: byChannel.rows.map((r) => ({ channel: r.channel, leads: Number(r.leads), won: Number(r.won), valueCents: Number(r.value_cents) })),

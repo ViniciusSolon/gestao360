@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
-import { api, brl, can, dateBR, dateTimeBR, formatCnpj, LEGACY_SOURCES, SOURCES, maskCnpj, toCents, useApi, useSubmit } from '../lib/api';
+import { api, brl, can, dateTimeBR, formatCnpj, LEGACY_SOURCES, SOURCES, maskCnpj, toCents, useApi, useSubmit } from '../lib/api';
 import { useSession } from '../lib/session';
 import { createPipelineInteractive, usePipelines, type Pipeline, type Stage } from '../lib/pipelines';
 
@@ -8,6 +8,8 @@ export interface Lead {
   id: string; name: string; company: string | null; cnpj: string | null; stage_id: string; status: string; score: number; is_mql: boolean;
   value_cents: string; owner_name: string | null; channel: string; created_at: string; updated_at: string;
 }
+
+const shortDate = (d: string) => new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 
 /** /app/funil abre o primeiro funil. */
 export function KanbanIndex() {
@@ -145,8 +147,8 @@ export function Kanban() {
                     <span>Score {l.score}</span>{l.is_mql && <span className="badge">MQL</span>}<span>{l.owner_name ?? 'sem responsável'}</span>
                   </div>
                   <div className="s lead-dates">
-                    <span title={`Criado em ${dateTimeBR(l.created_at)}`}>Criado {dateBR(l.created_at)}</span>
-                    <span title={`Atualizado em ${dateTimeBR(l.updated_at)}`}>Atualizado {dateBR(l.updated_at)}</span>
+                    <span title={`Criado em ${dateTimeBR(l.created_at)}`}>Criado {shortDate(l.created_at)}</span>
+                    <span title={`Atualizado em ${dateTimeBR(l.updated_at)}`}>Atualizado {shortDate(l.updated_at)}</span>
                   </div>
                   <Link to={`/app/leads/${l.id}`} className="lead-open" aria-label={`Abrir ${l.name}`} draggable={false}>Abrir →</Link>
                 </div>

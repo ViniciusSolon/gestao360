@@ -388,7 +388,7 @@ button.sm, a.btn { white-space: nowrap; }
 .table-scroll table { min-width: 940px; }
 .cell-sub { display: block; font-size: .75rem; }
 .prop-meta legend { font-size: .85rem; margin-bottom: .25rem; }
-.lead-dates { display: flex; justify-content: space-between; gap: .5rem; font-size: .72rem; margin-top: .25rem; padding-top: .3rem; border-top: 1px dashed var(--border); }
+.lead-dates { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .1rem .5rem; white-space: nowrap; font-size: .72rem; margin-top: .25rem; padding-top: .3rem; border-top: 1px dashed var(--border); }
 /* Metas x Receita */
 .goals-card { margin-top: 1rem; }
 .goals-head { margin-bottom: .75rem; align-items: flex-start; }

@@ -82,18 +82,21 @@ describe('Propostas: responsável, temperatura, previsão e filtros', () => {
 });
 
 describe('Indicadores comerciais: previsão de fechamento e Metas x Receita', () => {
-  it('previsão soma as propostas em aberto com fechamento previsto no período (por temperatura)', async () => {
+  it('previsão soma as propostas em aberto com fechamento previsto até o fim do mês, inclusive atrasadas (por temperatura)', async () => {
     const s = await signup(t.app);
     const lead = await createLead(t.app, s);
-    const today = new Date().toISOString().slice(0, 10);
-    const p1 = await proposal(s, lead.id, { temperature: 'hot', expectedCloseDate: today });
-    await proposal(s, lead.id, { temperature: 'cold', expectedCloseDate: '2099-01-01' }); // fora do período
-    const p3 = await proposal(s, lead.id, { temperature: 'warm', expectedCloseDate: today });
+    const now = new Date();
+    const lastDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+    const p1 = await proposal(s, lead.id, { temperature: 'hot', expectedCloseDate: lastDay });            // fim do mês: conta
+    const p0 = await proposal(s, lead.id, { temperature: 'cold', expectedCloseDate: '2020-01-10' });      // atrasada: conta
+    await proposal(s, lead.id, { temperature: 'cold', expectedCloseDate: '2099-01-01' });                 // futuro distante: não
+    await proposal(s, lead.id, { temperature: 'hot' });                                                   // sem previsão: não
+    const p3 = await proposal(s, lead.id, { temperature: 'warm', expectedCloseDate: lastDay });
     await call(t.app, s, 'POST', `/api/proposals/${p3.id}/send`);
     await call(t.app, s, 'POST', `/api/proposals/${p3.id}/reject`); // recusada não conta
     const d = (await call(t.app, s, 'GET', '/api/dashboard')).json();
-    expect(d.kpis.forecastCents.value).toBe(Number(p1.total_cents));
-    expect(d.forecastByTemperature).toMatchObject({ hot: Number(p1.total_cents), warm: 0, cold: 0, proposals: 1 });
+    expect(d.kpis.forecastCents.value).toBe(Number(p1.total_cents) + Number(p0.total_cents));
+    expect(d.forecastByTemperature).toMatchObject({ hot: Number(p1.total_cents), warm: 0, cold: Number(p0.total_cents), proposals: 2 });
   });
 
   it('grava a meta do mês e devolve o histórico com a receita (leads ganhos) de cada mês', async () => {
